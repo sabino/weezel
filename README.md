@@ -42,8 +42,8 @@ Status: Alpha. No documentation. Incomplete. Missing features.
 - [X] Pure clojure code/text editor (see [clobber](https://github.com/phronmophobic/clobber))
 - [ ] Polish: bug fixes, stability improvements, creature comforts
 - [X] Data viewer improvements (ie. improve [viscous](https://github.com/phronmophobic/viscous))
-- [ ] Git integration
-- [ ] Diff viewers
+- [X] Git integration
+- [X] Diff viewers
 - [X] Improve Tap viewer
 - [X] Logging View
 - [X] Exception stacktrace viewer
