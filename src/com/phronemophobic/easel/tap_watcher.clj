@@ -9,6 +9,10 @@
    [membrane.basic-components :as basic]
    [clojure.core.async :as async]
    [clojure.set :as set]
+   [clojure.string :as str]
+   [com.phronemophobic.easel.events :as events]
+   [com.phronemophobic.easel.inspector :as inspector]
+   [com.phronemophobic.easel.exceptions :as exceptions]
    [com.phronemophobic.viscous :as viscous]
 
    [com.phronemophobic.membrandt :as ant]))
@@ -59,7 +63,7 @@
                   body)]
        body)})))
 
-(defui tap-view [{:keys [tap-vals size]}]
+(defui tap-view [{:keys [tap-vals size paused? query]}]
   (basic/scrollview
    {:scroll-bounds size
     :$body nil
@@ -69,22 +73,41 @@
       :body 
       (apply
        ui/vertical-layout
-       (ant/button {:size :small
-                    :text "X"
-                    :on-click (fn []
-                                [[:set $tap-vals []]])})
+       (ui/horizontal-layout
+        (ant/button {:size :small
+                     :text "Clear"
+                     :on-click (fn [] [[:set $tap-vals []]])})
+        (ant/button {:size :small
+                     :text (if paused? "Resume" "Pause")
+                     :on-click (fn [] [[:update $paused? not]])})
+        (ui/label (str " " (count tap-vals) " taps"))
+        (ant/text-input {:text query :size :small :placeholder "Filter taps"}))
        (eduction
+        (filter (fn [entry]
+                  (str/includes? (str/lower-case (:summary entry))
+                                 (str/lower-case (or query "")))))
         (map-indexed
-         (fn [i obj]
-           (let [inspector-extra (get extra [::inspector [i obj]])]
+         (fn [i {:keys [obj time id]}]
+           (let [inspector-extra (get extra [::inspector id])]
              (ui/vertical-layout
+              (ui/horizontal-layout
+               (ui/label (str time " "))
+               (ant/button {:size :small :text "Inspect"
+                            :on-click #(vector [:com.phronemophobic.easel/add-applet
+                                                {:make-applet (fn [handler]
+                                                                (inspector/inspector-applet handler @obj))}])})
+               (when (instance? Throwable @obj)
+                 (ant/button {:size :small :text "Stacktrace"
+                              :on-click #(vector [:com.phronemophobic.easel/add-applet
+                                                  {:make-applet (fn [handler]
+                                                                  (exceptions/exception-applet handler @obj))}])})))
               (viscous/inspector
                {:obj obj
                 :width (get inspector-extra :width 40)
                 :height (get inspector-extra :height 1)
                 :show-context? (get inspector-extra :show-context?)
                 :extra inspector-extra})))))
-        tap-vals))})}))
+        (reverse tap-vals)))})}))
 
 (defn tap-ui [this $context context]
   (let [state (-> this
@@ -98,20 +121,42 @@
 (defrecord TapWatcher [dispatch!]
   model/IApplet
   (-start [this $ref size _content-scale]
-    (let [$tap-vals [$ref '(keypath :tap-vals)]
+    (let [active? (atom true)
           tapf (fn [o]
-                 (dispatch! :update $tap-vals conj (viscous/wrap o)))]
+                 (when @active?
+                   (let [entry {:id (random-uuid) :obj (viscous/wrap o)
+                                :time (java.time.Instant/now)
+                                :summary (inspector/preview o)}]
+                     (dispatch! :update $ref
+                                (fn [state]
+                                  (if (or (not @active?) (:paused? state))
+                                    state
+                                    (-> state
+                                        (update :tap-vals events/bounded-conj entry 500)
+                                        (update :extra
+                                                (fn [extra]
+                                                  (let [ids (into #{} (map :id) (:tap-vals state))]
+                                                    (into {} (remove (fn [[k _]]
+                                                                       (and (vector? k)
+                                                                            (= ::inspector (first k))
+                                                                            (not (contains? ids (second k))))))
+                                                          extra)))))))))))]
       (assoc this
              :extra {}
              :tap-vals []
+             :paused? false
+             :query ""
+             :active? active?
              :tapf tapf
-             :$tap-vals $tap-vals
              :$ref $ref
              :size size
              ::model/queue
              [(fn []
-                (add-tap tapf))])))
+                (when @active?
+                  (add-tap tapf)
+                  (when-not @active? (remove-tap tapf))))])))
   (-stop [this]
+    (reset! (:active? this) false)
     (when-let [tapf (:tapf this)]
       (remove-tap tapf))
     nil)

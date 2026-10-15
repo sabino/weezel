@@ -54,6 +54,10 @@
  :aliases
  {
 
+  :test
+  {:extra-paths ["test"]
+   :main-opts ["-m" "com.phronemophobic.easel.test-runner"]}
+
   :optional
   {:extra-paths ["../derpbot/config"]
    :extra-deps

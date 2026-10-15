@@ -6,6 +6,8 @@
    [membrane.ui :as ui]
    [membrane.alpha.component.drag-and-drop :as dnd]
    [com.phronemophobic.easel.model :as model]
+   [com.phronemophobic.easel.evaluation :as evaluation]
+   [com.phronemophobic.clobber.util :as clobber-util]
    [membrane.basic-components :as basic]
    [membrane.skia.paragraph :as para]
    [clojure.core.async :as async]
@@ -24,6 +26,45 @@
 
    [com.phronemophobic.membrandt :as ant]))
 
+(defn evaluation-source [editor scope]
+  (let [tree (:tree editor)
+        rope (:rope editor)
+        node (when tree
+               (case scope
+                 :last (clobber-util/previous-named-child-for-byte tree (-> editor :cursor :byte))
+                 :top (let [cursor (org.treesitter.TSTreeCursor. (.getRootNode ^org.treesitter.TSTree tree))]
+                        (when-not (= -1 (.gotoFirstChildForByte cursor (-> editor :cursor :byte)))
+                          (.currentNode cursor)))
+                 :buffer nil))]
+    (cond
+      (= :buffer scope) {:source (str rope) :line 1 :result-line 0}
+      node {:source (clobber-util/node->str rope node)
+            :line (inc (-> node .getStartPoint .getRow))
+            :result-line (-> node .getEndPoint .getRow)})))
+
+(defn evaluate-editor! [dispatch! {:keys [editor $editor]} scope]
+  (future
+    (when-let [{:keys [source line result-line]} (evaluation-source editor scope)]
+      (let [{:keys [value exception]}
+            (evaluation/evaluate source {:ns (:eval-ns editor)
+                                         :file (some-> (:file editor) .getCanonicalPath)
+                                         :line line})]
+        (if exception
+          (dispatch! ::cui/temp-status {:$editor $editor :msg (str "Exception: " (.getMessage ^Throwable exception))})
+          (do
+            (dispatch! :update $editor update :line-val
+                       (fn [values]
+                         {(:rope editor) (assoc (get values (:rope editor)) result-line (viscous/wrap value))}))
+            (dispatch! ::cui/temp-status
+                       {:$editor $editor
+                        :msg (if (= scope :buffer)
+                               "buffer loaded."
+                               (viscous/inspector {:obj (viscous/wrap value)
+                                                   :width 40 :height 1 :show-context? false}))})))))))
+
+(defeffect ::eval-last [m] (evaluate-editor! dispatch! m :last))
+(defeffect ::eval-top [m] (evaluate-editor! dispatch! m :top))
+(defeffect ::eval-buffer [m] (evaluate-editor! dispatch! m :buffer))
 
 (defui buffer-selector [{:keys [base-style
                                 buffer-select-state
@@ -89,7 +130,7 @@
                           (= (char key) \S))
                      [[:update $offset 
                        (fn [offset]
-                         (if (>= offset (count matching-applets))
+                         (if (<= (count matching-applets) 1)
                            0
                            (inc offset)))]]))))
              
@@ -98,12 +139,13 @@
                (cond
                  
                  (= s :enter)
-                 (let [applet (first matching-applets)
+                 (when-let [applet (first matching-applets)]
+                   (let [
                        applet-id (:id applet)
                        focus (:focus context)]
                    [[:com.phronemophobic.easel/set-pane-applet-id {:applet-id applet-id}]
                     [:set $buffer-select-state nil]
-                    [:set $focus applet-id]])
+                    [:set $focus applet-id]]))
                  
                  (= s :backspace)
                  [[:update $search-str
@@ -193,35 +235,39 @@
                 :$context $context}))
 
 
+(defn resize-editor [editor [width height]]
+  (-> editor
+      (cui/editor-set-height height)
+      (assoc :width width :height height)
+      text-mode/editor-update-viewport))
+
 (defn load-editor [dispatch! $ref editor-info size]
   (let [
-        height (nth size 1)
-        
         {:keys [editor ui]} (if (:editor editor-info)
                               editor-info
                               (clobber-editor/guess-mode editor-info))
 
         editor (if-let [line (:line editor-info)]
-                 (text-mode/editor-goto-line editor line)
+                 (if (> line 1)
+                   (text-mode/editor-goto-line editor (dec line))
+                   (assoc editor :cursor {:byte 0 :char 0 :point 0 :row 0 :column-byte 0}))
                  editor)
 
         editor (assoc editor
                       :label (:label editor-info)
                       :key-bindings
-                      (assoc (:key-bindings editor)
-                             "C-x 3" ::split-pane
-                             "C-x k" ::delete-pane
-                             "C-x b" ::show-select-buffer
-                             "C-x o" ::focus-next
-                             "C-x 1" ::close-other-panes
-                             "C-x 0" ::hide-pane))
+                      (cond-> (assoc (:key-bindings editor)
+                                     "C-x 3" ::split-pane
+                                     "C-x k" ::delete-pane
+                                     "C-x b" ::show-select-buffer
+                                     "C-x o" ::focus-next
+                                     "C-x 1" ::close-other-panes
+                                     "C-x 0" ::hide-pane)
+                        (identical? ui #'cui/code-editor)
+                        (assoc "C-x C-e" ::eval-last
+                               "C-M-x" ::eval-top
+                               "C-c C-k" ::eval-buffer)))
 
-        [width height] size
-        editor (-> editor
-                   (cui/editor-set-height height)
-                   (assoc :width width
-                          :height height)
-                   (text-mode/editor-update-viewport))
         $editor [$ref '(keypath :state) '(keypath :editor)]]
     (dispatch!
      :update
@@ -229,41 +275,52 @@
      (fn [applet]
        (-> applet
            (assoc :ui ui)
-           (assoc-in [:state :editor] editor)
+           (assoc-in [:state :editor] (resize-editor editor (or (:size applet) size)))
            (assoc-in [:state :$editor] $editor))))
-    (dispatch! ::cui/auto-reload-file
-               {:editor editor
-                :$editor $editor})))
+    (when-let [applet (dispatch! :get $ref)]
+      (when-let [file (:file editor)]
+        (let [active? (:active? applet)
+              stopped? (atom false)
+              watcher (beholder/watch
+                       (fn [{:keys [type]}]
+                         (when (and @active? (= type :modify))
+                           (#'cui/file-changed dispatch! $editor)))
+                       (.getCanonicalPath ^java.io.File file))
+              unwatch #(when (compare-and-set! stopped? false true) (beholder/stop watcher))]
+          (when-let [previous (first (swap-vals! (:unwatch* applet) (constantly unwatch)))]
+            (previous))
+          (dispatch! :update $editor assoc ::cui/auto-reload-unwatch unwatch)
+          (when-not @active? (unwatch)))))))
 
 (defrecord ClobberApplet [dispatch! editor-info]
   model/IApplet
   (-start [this $ref size _content-scale]
-    (let [
-          ]
+    (let [active? (atom true)]
       (assoc this
              :extra {}
              :tap-vals []
              :$ref $ref
              :size size
+             :active? active?
+             :unwatch* (atom nil)
              ::model/queue
              [(fn []
-                (load-editor dispatch! $ref editor-info size)
-                (dispatch! :repaint!))])))
+                (when @active?
+                  (load-editor dispatch! $ref editor-info size)
+                  (dispatch! :repaint!)))])))
   (-stop [this]
-    (dispatch! ::cui/auto-reload-file-unwatch
-               (:state this))
+    (when-let [active? (:active? this)] (reset! active? false))
+    (when-let [unwatch* (:unwatch* this)]
+      (when-let [unwatch (first (swap-vals! unwatch* (constantly nil)))]
+        (unwatch)))
     nil)
   model/IUI
   (-ui [this $context context]
     (clobber-ui this $context context))
   model/IResizable
   (-resize [this size _content-scale]
-    (let [[width height] size]
-      (-> this
-          (assoc :size size)
-          (update-in [:state :editor] cui/editor-set-height height)
-          (assoc-in [:state :editor :width] width)
-          (assoc-in [:state :editor :height] height)))))
+    (cond-> (assoc this :size size)
+      (get-in this [:state :editor]) (update-in [:state :editor] resize-editor size))))
 
 (defn ^:private truncate-string-end [s n]
   (if (> (count s) n)
@@ -278,7 +335,8 @@
 
 
 (defn clobber-applet [handler {:keys [file ns string label] :as m}]
-  (let [name (cond
+  (let [m (cond-> m (some? string) (assoc :source string))
+        name (cond
                label label
 
                file
@@ -321,24 +379,11 @@
   (let [applets (dispatch! :com.phronemophobic.easel/get-applets)
         root-pane (dispatch! :com.phronemophobic.easel/get-root-pane)
         applet-id (:id this)
-        
-        zpane (zfind (splitpane/pane-zip root-pane)
-               #(= applet-id (:applet-id %)))
-        clobber-pane? (fn [pane]
-                        (let [applet-id (:applet-id pane)
-                              applet (get applets applet-id)]
-                          (instance? ClobberApplet applet)))
-        next-clobber-pane (loop [loc (z/next zpane)]
-                            (cond 
-                              (= zpane loc) nil
-
-                              (z/end? loc)
-                              ;; start search from beginning
-                              (recur (splitpane/pane-zip (z/root loc)))
-                              
-                              (clobber-pane? (z/node loc)) (z/node loc)
-                                    
-                              :else (recur (z/next loc))))]
-    (when next-clobber-pane
-      (dispatch! :set $focus (:applet-id next-clobber-pane)))))
+        ids (into []
+                  (comp (map :applet-id)
+                        (filter #(instance? ClobberApplet (get applets %))))
+                  (splitpane/flatten-pane root-pane))
+        current (.indexOf ^java.util.List ids applet-id)]
+    (when (seq ids)
+      (dispatch! :set $focus (nth ids (mod (inc current) (count ids)))))))
 
