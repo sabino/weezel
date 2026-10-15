@@ -30,8 +30,9 @@
         eval-ns* (fn []
                    (try
                      (let [ns-sym (symbol eval-ns-name)]
-                       (require ns-sym)
-                       (the-ns ns-sym))
+                       (or (find-ns ns-sym)
+                           (do (require ns-sym)
+                               (the-ns ns-sym))))
                      (catch Exception e
                        nil)))]
     (ui/vertical-layout
@@ -163,6 +164,28 @@
                    (fn [handler]
                      ((requiring-resolve 'com.phronemophobic.easel.tap-watcher/tap-watcher-applet)
                       handler))}]])})
+     (button {:text "Data Inspector"
+              :on-click #(vector [:com.phronemophobic.easel/add-applet
+                                  {:make-applet (fn [handler]
+                                                  ((requiring-resolve 'com.phronemophobic.easel.inspector/inspector-applet)
+                                                   handler {}))}])})
+     (button {:text "Git"
+              :on-click #(vector [:com.phronemophobic.easel/add-applet
+                                  {:make-applet (requiring-resolve 'com.phronemophobic.easel.git/git-applet)}])})
+     (button {:text "Compare files"
+              :on-click #(vector [:com.phronemophobic.easel/add-applet
+                                  {:make-applet (fn [handler]
+                                                  ((requiring-resolve 'com.phronemophobic.easel.diff/diff-applet)
+                                                   handler {:compare? true :before "" :after ""}))}])})
+     (button {:text "Logs"
+              :on-click #(vector [:com.phronemophobic.easel/add-applet
+                                  {:make-applet (requiring-resolve 'com.phronemophobic.easel.logging/logging-applet)}])})
+     (button {:text "Exceptions"
+              :on-click #(vector [:com.phronemophobic.easel/add-applet
+                                  {:make-applet (requiring-resolve 'com.phronemophobic.easel.exceptions/exception-applet)}])})
+     (button {:text "FlowStorm"
+              :on-click #(vector [:com.phronemophobic.easel/add-applet
+                                  {:make-applet (requiring-resolve 'com.phronemophobic.easel.flowstorm/flowstorm-applet)}])})
      (button {:text "Derpbot"
               ;; :hover? (get applet [::hover?])
               :on-click

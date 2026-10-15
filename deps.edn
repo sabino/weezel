@@ -54,6 +54,9 @@
  :aliases
  {
 
+  :flowstorm
+  {:extra-deps {com.github.flow-storm/flow-storm-dbg {:mvn/version "4.5.9"}}}
+
   :test
   {:extra-paths ["test"]
    :main-opts ["-m" "com.phronemophobic.easel.test-runner"]}
