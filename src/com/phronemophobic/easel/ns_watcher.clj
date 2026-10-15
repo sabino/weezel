@@ -79,8 +79,7 @@
             (prn e))
           (finally
             (swap! watch-list* dissoc key)
-            (async/close! var-change-ch)
-            (println "closing")))))
+            (async/close! var-change-ch)))))
 
     (fn []
       (async/close! quit-ch))))
@@ -143,25 +142,31 @@
 (defrecord NSWatcher [dispatch! ns]
   model/IApplet
   (-start [this $ref size _content-scale]
-    (let [watch-key [::ns-watcher ns]
+    (let [watch-key [::ns-watcher (:id this) (random-uuid)]
+          active? (atom true)
           interns (ns->interns ns)
           $interns [$ref '(keypath :interns)]]
       (assoc this
              :extra {}
              :ns ns
+             :active? active?
+             :watch-key watch-key
              :interns interns
              ;; :unwatch unwatch
              :$ref $ref
              ::model/queue
              [(fn []
-                (let [unwatch (watch-ns ns watch-key
+                (when @active?
+                  (let [unwatch (watch-ns ns watch-key
                                         (fn []
-                                          (dispatch! :set $interns (ns->interns ns))))]
-                  (dispatch! :set [$ref '(keyath :unwatch)] unwatch)))]
+                                          (when @active?
+                                            (dispatch! :set $interns (ns->interns ns)))))]
+                    (dispatch! :set [$ref '(keypath :unwatch)] unwatch)
+                    (when-not @active? (unwatch-ns watch-key)))))]
              :size size)))
   (-stop [this]
-    (when-let [unwatch (:unwatch this)]
-      (unwatch))
+    (reset! (:active? this) false)
+    (unwatch-ns (:watch-key this))
     nil)
   model/IUI
   (-ui [this $context context]

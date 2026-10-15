@@ -15,7 +15,7 @@
             [com.phronemophobic.membrandt :as ant]
             [com.phronemophobic.membrandt.icon.ui :as icon.ui]
             [com.phronemophobic.easel.model :as model]
-            [com.phronemophobic.easel.browser :as browser]
+            [com.phronemophobic.easel.events :as events]
             [membrane.alpha.component.drag-and-drop :as dnd]
             [com.phronemophobic.schematic.view.util
              :as schematic-util]
@@ -76,6 +76,7 @@
             (try
               (work)
               (catch Throwable e
+                (events/report! e)
                 (println e))))
           queue)))
 
@@ -170,10 +171,12 @@
         (try
           ui
           (catch Exception e
+            (events/report! e)
             (tap> e)
             (prn e)
             (ui/label "Error!")))
         (fn [draw e]
+          (events/report! e)
           (tap> e)
           (prn e)
           (draw (ui/label "Error!")))))))
@@ -202,6 +205,7 @@
       (try
         (workf)
         (catch Throwable e
+          (events/report! e)
           (prn e)))
       (recur))))
 
@@ -242,6 +246,8 @@
             (fn []
               [[::clear-pane {:pane-id pane-id}]])
             (icon.ui/icon {:name "minus-square"}))
+         (ant/button {:text "Balance" :size :small
+                      :on-click #(vector [::balance-panes {:pane-id pane-id}])})
          (when (= ::root-pane pane-id)
            (ui/on-click
             (fn []
@@ -253,12 +259,14 @@
     [(ui/on
       :mouse-down
       (fn [_]
-        [[::dnd/drag-start {::dnd/obj {::pane pane}}]])
+        (when (empty? (:panes pane))
+          [[::dnd/drag-start {::dnd/obj {::pane pane}}]]))
       (schematic-util/on-drag-hover
        {:$body nil
         :extra (get extra ::drag-extra)
         :body
-        [(when (and (::pane drag-object)
+        [(when (and (empty? (:panes pane))
+                    (::pane drag-object)
                     drop-object)
            (dnd/on-drop
             (fn [_pos obj]
@@ -288,6 +296,12 @@
           (specter/transform [:root-pane splitpane/WALK-PANE #(= pane-id (:id %))]
                              #(splitpane/toggle-direction %))
           relayout*))))
+
+(defeffect ::balance-panes [{:keys [$easel pane-id]}]
+  (dispatch! :update $easel
+             #(-> %
+                  (update :root-pane splitpane/edit-pane-by-id pane-id splitpane/balance-pane)
+                  relayout*)))
 
 (defeffect ::toggle-pane-resize [{:keys [$easel pane-id]}]
   (dispatch!
@@ -390,8 +404,9 @@
            coord (if (= direction :column)
                    (nth mpos 1)
                    (nth mpos 0))
-           delta (- coord
-                    start-coord)
+           delta (-> (- coord start-coord)
+                     (max (if to-size (- to-size) Double/NEGATIVE_INFINITY))
+                     (min (if from-size from-size Double/POSITIVE_INFINITY)))
 
            pane-ids (into #{} (remove nil?) [from-pane to-pane])
            easel
@@ -422,12 +437,17 @@
   (dispatch!
    :update $easel
    (fn [easel]
-     (-> easel
-         (update :root-pane
-                 (fn [pane]
-                   (-> pane
-                       (dissoc :drag-state))))
-         relayout*))))
+     (let [id (get-in easel [:root-pane :drag-state :to-pane])
+           loc (when id (zfind (splitpane/pane-zip (-> easel ::cached-layout :root-pane-layout))
+                               #(= id (:id %))))
+           parent (some-> loc z/up z/node)]
+       (-> easel
+           (update :root-pane
+                   (fn [pane]
+                     (cond-> (dissoc pane :drag-state)
+                       parent (splitpane/edit-pane-by-id (:id parent)
+                                                         #(splitpane/relative-sizes % parent)))))
+           relayout*)))))
 
 (defeffect ::splitpane [{:keys [$easel pane-id]}]
   (dispatch!
@@ -455,7 +475,8 @@
                  (fn [root-pane]
                    (let [from-pane (splitpane/find-pane-by-id root-pane from-pane-id)
                          to-pane (splitpane/find-pane-by-id root-pane to-pane-id)]
-                     (if (and from-pane to-pane)
+                     (if (and from-pane to-pane
+                              (empty? (:panes from-pane)) (empty? (:panes to-pane)))
                        (-> root-pane
                            (splitpane/edit-pane-by-id from-pane-id
                                                       (fn [pane]
@@ -471,15 +492,11 @@
   (dispatch!
    :update $easel
    (fn [easel]
-     (-> easel
-         (update :root-pane
-                 (fn [root-pane]
-                   (assert (and pane-id applet-id))
-                   (-> root-pane
-                       (splitpane/edit-pane-by-id pane-id
-                                                  (fn [pane]
-                                                    (assoc pane :applet-id applet-id))))))
-         relayout*))))
+     (if (contains? (:applets easel) applet-id)
+       (-> easel
+           (update :root-pane splitpane/assign-applet pane-id applet-id)
+           relayout*)
+       easel))))
 
 
 
@@ -504,15 +521,9 @@
   (dispatch! :update
              $easel
              (fn [easel]
-               (let [zpane (zfind (splitpane/pane-zip (:root-pane easel))
-                                  (fn [pane]
-                                    (= pane-id (:id pane))))]
-                 (-> easel
-                     (update :root-pane assoc :panes 
-                             (if zpane
-                               [(z/node zpane)]
-                               []))
-                     relayout*)))))
+               (-> easel
+                   (update :root-pane splitpane/isolate-pane pane-id)
+                   relayout*))))
 
 (defeffect ::hide-pane [{:keys [$easel pane-id] :as m}]
   (dispatch!
@@ -571,27 +582,9 @@
                                     (ui/on
                                      :mouse-down
                                      (fn [_]
-                                       ;; The basic idea is that when resizing a row of panes
-                                       ;; we'll break it down into a few cases.
-                                       ;; If it's the first item in layout, then we
-                                       ;; treat the resizing as if it's setting the absolute size
-                                       ;; of the first item.
-                                       ;; If it's the last item, we treat it as if it's resizing
-                                       ;; the absolute size of the last item.
-                                       ;; Finally, if it's in the middle and doesn't border the
-                                       ;; edge items, we treat it as if both panes on either side of the
-                                       ;; border are being resized.
-                                       (cond
-
-                                         (zero? idx)
-                                         [[::begin-resize-drag {:to-pane (:id subpane)}]]
-
-                                         (= idx (- (count subpanes) 2))
-                                         [[::begin-resize-drag {:from-pane (-> subpanes last :id)}]]
-
-                                         :else
-                                         [[::begin-resize-drag {:to-pane (-> subpanes (nth idx) :id)
-                                                                :from-pane (-> subpanes (nth (inc idx)) :id)}]]))
+                                       ;; Resize adjacent panes while preserving their combined size.
+                                       [[::begin-resize-drag {:to-pane (:id subpane)
+                                                              :from-pane (-> subpanes (nth (inc idx)) :id)}]])
                                      (ui/filled-rectangle fill-color
                                                           w h))}))))))
               (drop-last subpanes))]))))
@@ -711,19 +704,19 @@
                                               ::add-applet
                                               (fn [m]
                                                 [[::add-applet (assoc m :pane-id pane-id)]])
-                                              (ui/scissor-view
-                                               [0 0]
-                                               [(:width pane)
-                                                (max 1
-                                                     (- (:height pane)
-                                                        top-bar-height
-                                                        1))]
-                                               (list-applets/list-applets {:shared-state shared-state
+                                              (basic/scrollview
+                                               {:scroll-bounds [(:width pane)
+                                                                (max 0 (- (:height pane) top-bar-height 1))]
+                                                :extra (get extra [::list-scroll pane-id])
+                                                :$extra [$extra (list 'keypath [::list-scroll pane-id])]
+                                                :$body nil
+                                                :body
+                                                (list-applets/list-applets {:shared-state shared-state
                                                                            :$shared-state $shared-state
                                                                            :extra list-applets-extra
                                                                            :$extra $list-applets-extra
                                                                            :context context
-                                                                           :$context $context})))))))))))
+                                                                           :$context $context})}))))))))))
               (-> easel ::cached-layout :all-panes))
         main-view (if (::pane-resize root-pane)
                     (ui/no-events main-view)
@@ -801,7 +794,10 @@
                           (prn e))))))
           relayout*)))
   (-show-applet [this id]
-    (let [;; check if there is an empty pane first
+    (if (or (not (contains? applets id))
+            (contains? (-> this ::cached-layout :by-applet-id) id))
+      this
+      (let [;; check if there is an empty pane first
           ;; if so, add it to the empty pane
           ;; otherwise, add a new pane
           empty-pane-id (first-empty-pane-id this)
@@ -813,7 +809,7 @@
                  (update this :root-pane
                          #(splitpane/add-child % {:id (random-uuid)
                                                   :applet-id id})))]
-      (relayout* this)))
+        (relayout* this))))
   (-hide-applet [this id]
     (-> this
         (update :root-pane
@@ -826,8 +822,8 @@
                            :by-applet-id)]
       (into []
             (filter (fn [applet]
-                      (contains? by-applet-id (:applet-id applet))))
-            applets)))
+                      (contains? by-applet-id (:id applet))))
+            (vals applets))))
 
   (-applets [this]
     applets)
@@ -853,7 +849,7 @@
                                all-panes)}
 
           this (assoc this
-                      ;; :size [w h]
+                      :size [w h]
                       :root-pane root-pane
                       ::cached-layout cached-layout
                       :content-scale content-scale)
@@ -1109,8 +1105,12 @@
           (fn [easel]
             (-> easel
                 (model/-remove-applet id)))]])
-      (ui/vertical-layout
-       (tab-view {:tabs (vals (model/-applets easel))
+      (basic/scrollview
+       {:scroll-bounds [tab-width (max 0 (or ch 0))]
+        :$body nil
+        :body
+        (ui/vertical-layout
+         (tab-view {:tabs (vals (model/-applets easel))
                   :selected (-> easel ::cached-layout :by-applet-id)
                   :width tab-width})
        (add-$easel
@@ -1120,10 +1120,11 @@
           ::select-workspace
           ::delete-workspace}
         (workspace-view {:workspaces (:workspaces easel)
-                         :width tab-width}))))
+                         :width tab-width})))}))
      (add-$easel
       $easel
       #{::toggle-pane-direction
+        ::balance-panes
         ::add-pane-child
         ::delete-pane
         ::close-other-panes
@@ -1202,7 +1203,9 @@
 (defn add-browser [url]
   (swap! app-state
          update :easel
-         model/-add-applet {:make-applet (browser/browslet handler url)})
+         model/-add-applet {:make-applet (fn [dispatch!]
+                                          ((requiring-resolve 'com.phronemophobic.easel.browser/browslet)
+                                           dispatch! url))})
   nil)
 
 (defn remove-all-widgets [easel]

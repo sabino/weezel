@@ -48,7 +48,7 @@ Status: Alpha. No documentation. Incomplete. Missing features.
 - [X] Logging View
 - [X] Exception stacktrace viewer
 - [X] Flowstorm integration
-- [ ] Improved Pane management
+- [X] Improved Pane management
 
 ### License
 

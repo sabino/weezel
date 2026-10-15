@@ -87,6 +87,18 @@
                      pane)
   )
 
+(defn assign-applet [root pane-id applet-id]
+  (let [target (find-pane-by-id root pane-id)]
+    (if (and target (empty? (:panes target)))
+      (specter/transform [WALK-PANE]
+                         (fn [pane]
+                           (cond
+                             (= pane-id (:id pane)) (assoc pane :applet-id applet-id)
+                             (= applet-id (:applet-id pane)) (dissoc pane :applet-id)
+                             :else pane))
+                         root)
+      root)))
+
 (comment
   (delete-pane-by-id  {:panes [{:id 42
                                 :panes [{:id 32}]}]}
@@ -166,6 +178,52 @@
             (conj (or panes [])
                   child))))
 
+(defn child-sizes [subpanes direction available]
+  (let [fixed (mapv #(some-> (get-size % direction) (max 0)) subpanes)
+        weights (mapv #(max 0 (or (get-stretch % direction) 1)) subpanes)
+        fixed-total (reduce + 0 (keep identity fixed))
+        flex-total (reduce + 0 (map #(if %1 0 %2) fixed weights))
+        flex-count (count (filter nil? fixed))
+        remaining (max 0 (- available fixed-total))]
+    (mapv (fn [size weight]
+            (if size
+              (if (> fixed-total available)
+                (* available (/ size fixed-total))
+                size)
+              (if (pos? flex-total)
+                (* remaining (/ weight flex-total))
+                (/ remaining (max 1 flex-count)))))
+          fixed weights)))
+
+(defn balance-pane [pane]
+  (update pane :panes
+          (fn [children]
+            (mapv #(-> %
+                       (dissoc :width :height
+                               :flex-layout.stretch/width :flex-layout.stretch/height
+                               :flex.grow/width :flex.grow/height)
+                       balance-pane)
+                  children))))
+
+(defn relative-sizes [pane layout]
+  (let [direction (:direction pane)
+        size-key (if (= direction :column) :height :width)
+        stretch-key (if (= direction :column) :flex-layout.stretch/height :flex-layout.stretch/width)
+        grow-key (if (= direction :column) :flex.grow/height :flex.grow/width)
+        sizes (into {} (map #(vector (:id %) (get-size % direction))) (:panes layout))]
+    (update pane :panes
+            #(mapv (fn [child]
+                     (-> child
+                         (dissoc size-key stretch-key)
+                         (assoc grow-key (max 0 (get sizes (:id child) 0))))) %))))
+
+(defn isolate-pane [root id]
+  (if (or (= id (:id root)) (nil? (find-pane-by-id root id)))
+    root
+    (assoc root :panes [(dissoc (find-pane-by-id root id)
+                               :width :height
+                               :flex-layout.stretch/width :flex-layout.stretch/height)])))
+
 (defn layout-pane-nested
   "Returns pane structure with :width or :height key filled in. Leaves space for a top bar"
   [pane top-bar-height]
@@ -182,34 +240,15 @@
                                 [size
                                  (max 0 (- cross-size top-bar-height))])
 
-            {:keys [stretch-total size-total]}
-            (persistent!
-             (reduce
-              (fn [m subpane]
-                (if-let [size (get-size subpane direction)]
-                  (assoc! m :size-total (+ (:size-total m)
-                                           size))
-                  (let [stretch (or (get-stretch subpane direction)
-                                    1)]
-                    (assoc! m :stretch-total (+ (:stretch-total m)
-                                                stretch)))))
-              (transient
-               {:stretch-total 0
-                :size-total 0})
-              subpanes))
-
-            stretch-size (max 0 (- size size-total))]
+            sizes (child-sizes subpanes direction (max 0 size))]
 
         (assoc pane
                :panes (into []
                             (comp
-                             (map (fn [pane]
-                                    (let [pane (if (get-size pane direction)
-                                                 pane
-                                                 (let [stretch (or (get-stretch pane direction)
-                                                                   1)]
-                                                   (set-size pane direction (* stretch-size (/ stretch stretch-total)))))]
-                                      (set-cross-size pane direction cross-size))))
+                             (map-indexed (fn [i pane]
+                                            (-> pane
+                                                (set-size direction (nth sizes i))
+                                                (set-cross-size direction (max 0 cross-size)))))
                              (if column?
                                (comp (stack-layout (:direction pane) top-bar-height)
                                      (map (fn [pane]
