@@ -21,7 +21,7 @@
    [com.phronemophobic.viscous :as viscous]
    [com.phronemophobic.clobber.modes.clojure.ui :as cui]
    [com.phronemophobic.clobber.editor :as clobber-editor]  
-   [nextjournal.beholder :as beholder]
+   [com.phronemophobic.easel.file-watcher :as watcher]
    [clojure.zip :as z]
    [com.phronemophobic.clobber.modes.clojure :as clojure-mode]
    [com.phronemophobic.clobber.modes.text :as text-mode]
@@ -363,12 +363,12 @@
       (when-let [file (:file editor)]
         (let [active? (:active? applet)
               stopped? (atom false)
-              watcher (beholder/watch
+              watcher (watcher/watch
                        (fn [{:keys [type]}]
                          (when (and @active? (= type :modify))
                            (#'cui/file-changed dispatch! $editor)))
                        (.getCanonicalPath ^java.io.File file))
-              unwatch #(when (compare-and-set! stopped? false true) (beholder/stop watcher))]
+              unwatch #(when (compare-and-set! stopped? false true) (watcher/stop watcher))]
           (when-let [previous (first (swap-vals! (:unwatch* applet) (constantly unwatch)))]
             (previous))
           (dispatch! :update $editor assoc ::cui/auto-reload-unwatch unwatch)

@@ -4,7 +4,7 @@
             [clojure.java.io :as io]
             [clojure.string :as str]
             [com.phronemophobic.easel.events :as events]
-            [nextjournal.beholder :as beholder]))
+            [com.phronemophobic.easel.file-watcher :as watcher]))
 
 (def builtin-resources
   {:easel/base "com/phronemophobic/easel/themes/base.edn"
@@ -161,7 +161,7 @@
   ([file on-change lookup] (watch-file! file on-change lookup events/report!))
   ([file on-change lookup on-error]
   (let [active? (atom true)
-        watcher (beholder/watch
+        watcher (watcher/watch
                  (fn [{:keys [type]}]
                    (when (and @active? (#{:modify :create} type))
                      (try
@@ -172,4 +172,4 @@
                        (catch Throwable e (on-error e)))))
                  (.getCanonicalPath (io/file file)))]
     (fn []
-      (when (compare-and-set! active? true false) (beholder/stop watcher))))))
+      (when (compare-and-set! active? true false) (watcher/stop watcher))))))

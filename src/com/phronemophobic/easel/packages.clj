@@ -3,7 +3,7 @@
             [clojure.java.io :as io]
             [clojure.repl.deps :as deps]
             [clojure.string :as str]
-            [nextjournal.beholder :as beholder]
+            [com.phronemophobic.easel.file-watcher :as watcher]
             [com.phronemophobic.easel.composition :as composition]
             [com.phronemophobic.easel.keymap :as keymap]
             [com.phronemophobic.easel.events :as events]
@@ -312,7 +312,7 @@
                                (when (and (#{:composition :keymap} (:kind p)) (.isFile (io/file origin)))
                                  [(.getCanonicalPath (io/file origin)) p]))) (vals (catalog)))
         watchers (mapv (fn [[path package]]
-                         (beholder/watch
+                         (watcher/watch
                           (bound-fn [{event-path :path :keys [type]}]
                             (when (and @active? (#{:modify :create :delete :overflow} type)
                                        (or (= :overflow type)
@@ -347,7 +347,7 @@
                                     (handler :update :easel assoc :configuration-error (.getMessage e)))))))
                           (.getParent (io/file path)))) files)]
     (swap! data-watchers assoc kind
-           #(when (compare-and-set! active? true false) (run! beholder/stop watchers)))))
+           #(when (compare-and-set! active? true false) (run! watcher/stop watchers)))))
 
 (defn select-composition! [handler id & [persist? watch?]]
   (with-runtime
