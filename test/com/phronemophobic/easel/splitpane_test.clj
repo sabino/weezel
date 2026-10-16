@@ -51,6 +51,22 @@
     (is (= shown (model/-show-applet shown :missing)))
     (is (= [600 400] (:size (easel/remove-all-widgets shown))))))
 
+(deftest adding-applets-fills-empty-panes
+  (let [factory (fn [_] (applet/tool-applet "Test" identity {}))
+        base (-> (easel/make-easel) (assoc :$ref '(keypath :easel))
+                 (model/-add-applet {:make-applet factory}))
+        state (atom {:easel base})
+        handler (component/default-handler state)
+        first-pane (first (pane/flatten-pane (:root-pane base)))]
+    (is (= 1 (count (pane/flatten-pane (:root-pane base)))))
+    (handler ::easel/split-direction {:pane-id (:id first-pane) :direction :row})
+    (let [empty-pane (some #(when-not (:applet-id %) %) (pane/flatten-pane (get-in @state [:easel :root-pane])))]
+      (handler ::easel/add-to-pane (:id empty-pane))
+      (is (= (:id empty-pane) (get-in @state [:easel :commands :pane-id])))
+      (swap! state update :easel model/-add-applet {:pane-id (:id empty-pane) :make-applet factory})
+      (is (= 2 (count (pane/flatten-pane (get-in @state [:easel :root-pane])))))
+      (is (every? :applet-id (pane/flatten-pane (get-in @state [:easel :root-pane])))))))
+
 (deftest unique-applet-placement
   (let [root {:id :root :panes [{:id :a :applet-id 1} {:id :b :applet-id 2}]}
         moved (pane/assign-applet root :b 1)]

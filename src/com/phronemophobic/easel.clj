@@ -765,7 +765,7 @@
                   (ui/translate 20 20
                     (eui/button {:text "Add applet" :icon "plus"
                                  :context context :$context $context
-                                 :on-click #(vector [::show-commands ""]) })))))
+                                 :on-click #(vector [::add-to-pane (:id pane)]) })))))
             (eui/border context w h)]))))
      (when (::pane-resize (:root-pane easel))
        (pane-resizer {:root-pane-layout (-> easel ::cached-layout :root-pane-layout)
@@ -805,6 +805,7 @@
                         ::instance-token (random-uuid) :render-error* (atom nil))
                    dock-slot (assoc :dock-slot dock-slot)
                    overlay? (assoc :overlay? true))
+          pane-id (or pane-id (when-not (or pop-out? from-pane-id dock-slot overlay?) (first-empty-pane-id this)))
           target (when pane-id (splitpane/find-pane-by-id root-pane pane-id))
           root-pane (cond
                       (or dock-slot overlay?) root-pane
@@ -1265,6 +1266,10 @@
     (when commands
       (dispatch! :set '[(keypath :membrane.component/context) (keypath :focus)] (:previous-focus commands)))))
 
+(defeffect ::add-to-pane [pane-id]
+  (dispatch! ::show-commands "")
+  (dispatch! :update :easel assoc-in [:commands :pane-id] pane-id))
+
 (defeffect ::select-dock [slot]
   (let [easel (dispatch! :get :easel)]
     (when-not (get-in easel [:dock :applets slot])
@@ -1302,7 +1307,8 @@
        {:name (str (when-not (installed? p) "Install ") (:name p)) :icon (or (:icon p) "plus")
         :intents (if (installed? p)
                    [[::hide-commands] [::close-tools]
-                    [::add-applet {:make-applet #((requiring-resolve 'com.phronemophobic.easel.packages/make-applet) % (:id p) nil)}]]
+                    [::add-applet {:pane-id (get-in easel [:commands :pane-id])
+                                   :make-applet #((requiring-resolve 'com.phronemophobic.easel.packages/make-applet) % (:id p) nil)}]]
                    [[::hide-commands] [::open-tools] [:com.phronemophobic.easel.package-ui/select (:id p)]])})
      (for [p (vals catalog) :when (= :theme (:kind p))]
        {:name (str "Theme: " (:name p)) :icon "skin"
