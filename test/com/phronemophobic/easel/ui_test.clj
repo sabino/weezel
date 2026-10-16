@@ -1,12 +1,15 @@
 (ns com.phronemophobic.easel.ui-test
   (:require [clojure.test :refer [deftest is testing]]
             [com.phronemophobic.easel.diff :as diff]
+            [com.phronemophobic.easel.dewey :as dewey]
+            [com.phronemophobic.easel.builder-test :as views]
             [com.phronemophobic.easel.documentation :as documentation]
             [com.phronemophobic.easel.exceptions :as exceptions]
             [com.phronemophobic.easel.flowstorm :as flowstorm]
             [com.phronemophobic.easel.git :as git]
             [com.phronemophobic.easel.inspector :as inspector]
             [com.phronemophobic.easel.logging :as logging]
+            [com.phronemophobic.easel.repl :as repl]
             [com.phronemophobic.easel.tap-watcher :as tap]
             [com.phronemophobic.easel.applet :as applet]
             [com.phronemophobic.easel.model :as model]
@@ -300,3 +303,27 @@
     (is (every? number? (ui/bounds (app))))
     (ui/key-press (app) :enter)
     (is (= [19] @calls))))
+
+(deftest busy-repl-keeps-cancellation-inside-small-panes
+  (doseq [[w h :as size] [[640 480] [360 260]]]
+    (let [state (atom {:size size :state (assoc (:state (repl/repl-applet nil)) :busy? true)})
+          app (component/make-app #'repl/repl-view state)
+          {:keys [x y size] :as cancel} (some #(when (= "Cancel" (:text %)) %) (button-frames (app)))]
+      (is (some? cancel))
+      (when cancel
+        (is (<= 0 x (+ x (first size)) w))
+        (is (<= 0 y (+ y (second size)) h))
+        (ui/mouse-down (app) [(+ x 4) (+ y 4)])
+        (is (false? (get-in @state [:state :busy?])))))))
+
+(deftest dewey-errors-remain-reachable-in-small-panes
+  (let [message "The library index could not be loaded. Choose an existing file and try again."
+        state (atom {:size [360 260] :state {:query "" :source "" :error message}})
+        app (component/make-app #'dewey/dewey-view state)
+        error-frame #(first (views/frames (app) (fn [v] (= message (:paragraph v)))))]
+    (let [{:keys [y size]} (error-frame)]
+      (is (> (+ y (second size)) 260)))
+    (ui/scroll (app) [0 200] [30 180])
+    (let [{:keys [y size]} (error-frame)]
+      (is (<= 0 y))
+      (is (<= (+ y (second size)) 260)))))

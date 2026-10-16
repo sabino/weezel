@@ -64,10 +64,10 @@
          :image (let [scale (min 1 (/ (first bounds) (first dimensions)) (/ (second bounds) (second dimensions)))]
                   (ui/image file (mapv #(* scale %) dimensions)))
          :audio (ui/vertical-layout
-                 (eui/text {:text format :size 12 :color :color/secondary})
+                 (eui/text {:text format :width (first bounds) :size 12 :color :color/secondary})
                  (eui/row nil [(eui/button {:text "Play" :on-click #(vector [::play $state true])})
                               (eui/button {:text "Stop" :on-click #(vector [::play $state false])})]))
-         (eui/text {:text "Images and local audio in your workspace." :color :color/secondary}))))))
+         (eui/text {:text "Images and local audio in your workspace." :width (first bounds) :color :color/secondary}))))))
 
 (defn media-applet [handler]
   (let [resources (atom {:active? true})]

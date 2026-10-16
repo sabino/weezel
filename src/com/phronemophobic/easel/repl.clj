@@ -31,13 +31,20 @@
 
 (defui repl-view [{:keys [state size]}]
   (let [[w h] size
-        input (ui/horizontal-layout
-                (eui/text {:text (str (:ns state) "> ") :role :code})
-                (eui/field {:text (:source state "") :$text [$state '(keypath :source)]
-                            :placeholder "Evaluate a form…" :role :code :variant :bare
-                            :disabled? (:busy? state) :height 28
-                            :width (max 40 (- w 250))
-                            :on-submit #(vector [::evaluate $state])}))
+        prompt (eui/text {:text (str (:ns state) "> ") :role :code})
+        cancel (when (:busy? state)
+                 (eui/button {:text "Cancel" :variant :link :size :small
+                              :on-click #(vector [::cancel $state])}))
+        input (ui/padding 20 8
+                (eui/row nil
+                  [prompt
+                   (eui/field {:text (:source state "") :$text [$state '(keypath :source)]
+                               :placeholder "Evaluate a form…" :role :code :variant :bare
+                               :disabled? (:busy? state) :height 28
+                               :width (max 1 (- w 40 (ui/width prompt) (if cancel (+ 8 (ui/width cancel)) 0)))
+                               :on-submit #(vector [::evaluate $state])})
+                   (when cancel (ui/spacer 8 0))
+                   cancel] 0))
         history (apply ui/vertical-layout
                        (for [entry (:entries state)]
                          (ui/vertical-layout
@@ -54,11 +61,9 @@
                           (ui/spacer 0 16))))]
     (ui/vertical-layout
      (basic/scrollview
-      {:scroll-bounds [(max 0 w) (max 0 (- h 45))] :$body nil
+      {:scroll-bounds [(max 0 w) (max 0 (- h (ui/height input)))] :$body nil
        :body (ui/padding 20 12 history)})
-     (ui/padding 20 0 input)
-     (when (:busy? state)
-       (eui/button {:text "Cancel" :variant :link :size :small :on-click #(vector [::cancel $state])})))))
+     input)))
 
 (defn repl-applet
   ([handler] (repl-applet handler 'user))
