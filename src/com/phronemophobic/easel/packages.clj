@@ -15,6 +15,7 @@
            [clojure.lang DynamicClassLoader Compiler]))
 
 (defonce runtime-loader (DynamicClassLoader. (clojure.lang.RT/baseLoader)))
+(defonce runtime-data-readers (atom {}))
 (defonce loaded (atom {}))
 (defonce theme-watcher (atom nil))
 (defonce data-watchers (atom {}))
@@ -22,8 +23,18 @@
 (defn with-runtime [f]
   (let [thread (Thread/currentThread) previous (.getContextClassLoader thread)]
     (try (.setContextClassLoader thread runtime-loader)
-         (with-bindings {Compiler/LOADER runtime-loader #'*repl* true} (f))
+         (with-bindings {Compiler/LOADER runtime-loader #'*repl* true
+                         #'*data-readers* (merge @runtime-data-readers *data-readers*)} (f))
          (finally (.setContextClassLoader thread previous)))))
+
+(defn- add-libs! [coords]
+  (when (seq coords)
+    (with-runtime
+      #(let [previous *data-readers*
+             result (deps/add-libs coords)]
+         (swap! runtime-data-readers merge
+                (into {} (remove (fn [[tag reader]] (= reader (get previous tag)))) *data-readers*))
+         result))))
 
 (defn validate [descriptor]
   (when-not (and (map? descriptor) (= 1 (:package/version descriptor))
@@ -148,7 +159,7 @@
           restart? (boolean (seq changed))]
       (if restart?
         (process/checked ["clojure" "-P" "-Sdeps" (pr-str {:deps coords})] {:timeout-ms 180000})
-        (with-runtime #(deps/add-libs coords)))
+        (add-libs! coords))
       (when-not restart?
         (doseq [p packages :when (:setup p)]
           (with-runtime #((requiring-resolve (:setup p))))))
@@ -400,7 +411,7 @@
           (doseq [[lib coord] coords :when (and (get current lib)
                                                (not= coord (select-keys (get current lib) (keys coord))))]
             (throw (ex-info "Restart with a compatible dependency configuration to load this package" {:lib lib})))
-          (with-runtime #(deps/add-libs coords))
+          (add-libs! coords)
           (swap! loaded merge coords))
         (doseq [p (vals (:packages config)) :when (and (:restart? p) (:setup p))]
           (with-runtime #((requiring-resolve (:setup p)))))
