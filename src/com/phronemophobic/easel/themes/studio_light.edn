@@ -1,0 +1,5 @@
+{:theme/version 1
+ :id :easel/studio-light
+ :name "Studio light"
+ :extends :easel/base
+ :tokens {}}

@@ -1,0 +1,43 @@
+{:theme/version 1
+ :id :easel/base
+ :name "Base"
+ :tokens
+ {:color/window "#EEF1F4"
+  :color/surface "#FFFFFF"
+  :color/sidebar "#F5F7F9"
+  :color/header "#F9FBFC"
+  :color/canvas "#FCFCFB"
+  :color/text "#101828"
+  :color/secondary "#52617A"
+  :color/muted "#8996AA"
+  :color/border "#D6DCE4"
+  :color/accent "#0064FF"
+  :color/selection "#DCEEFA"
+  :color/hover "#EEF4FA"
+  :color/live "#22A351"
+  :color/error "#BA3443"
+  :color/warning "#B77716"
+  :color/code-keyword "#0058CA"
+  :color/code-string "#32734A"
+  :color/code-symbol "#111827"
+  :color/code-definition "#7A249A"
+  :color/code-comment "#7F8C9E"
+  :font/ui ["Helvetica Neue" "Arial" "sans-serif"]
+  :font/code ["Menlo" "monospace"]
+  :font/size 14
+  :font/code-size 13
+  :space/unit 4
+  :space/pane 20
+  :metric/sidebar 180
+  :metric/topbar 54
+  :metric/pane-header 44
+  :metric/status 26
+  :metric/dock 240
+  :metric/gap 8
+  :radius/control 4}
+ :components
+ {:button {:height 32 :padding 12 :radius :radius/control}
+  :field {:height 36 :padding 12 :radius :radius/control}
+  :row {:height 40 :padding 12}
+  :pane {:header-height :metric/pane-header :padding :space/pane}}
+ :applets {}}

@@ -1,0 +1,25 @@
+{:theme/version 1
+ :id :easel/studio-dark
+ :name "Studio dark"
+ :extends :easel/base
+ :tokens
+ {:color/window "#171C24"
+  :color/surface "#1D2430"
+  :color/sidebar "#19202A"
+  :color/header "#202936"
+  :color/canvas "#1B222C"
+  :color/text "#E6EDF6"
+  :color/secondary "#B4C1D5"
+  :color/muted "#7D8DA4"
+  :color/border "#354254"
+  :color/accent "#74B6FF"
+  :color/selection "#283F59"
+  :color/hover "#293545"
+  :color/live "#68D28A"
+  :color/error "#FF8B96"
+  :color/warning "#F1BE6B"
+  :color/code-keyword "#8CC2FF"
+  :color/code-string "#9CD6AC"
+  :color/code-symbol "#E6EDF6"
+  :color/code-definition "#D6A8F3"
+  :color/code-comment "#8F9FB6"}}
