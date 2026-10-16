@@ -1,7 +1,36 @@
 
 **Easel** - A Pure Clojure IDE in the Spirit of Emacs
 
-Status: Alpha. No documentation. Incomplete. Missing features.
+Status: Alpha. Incomplete. Missing features.
+
+### Screenshots
+
+Easel starts with an empty Minimal workspace. These native captures show optional tools and workspaces; themes, compositions, and keymaps are EDN data.
+
+| Studio · light | Studio · dark |
+| --- | --- |
+| [![Studio light: editor, live graphics, inspector, documentation, and REPL](screenshots/studio-light.png)](screenshots/studio-light.png) | [![The same Studio workspace in the dark theme](screenshots/studio-dark.png)](screenshots/studio-dark.png) |
+
+Minimal: an editor and an inspector.
+
+![Minimal composition with evaluated Clojure values](screenshots/minimal.png)
+
+Sketchbook: rotating the interactive 3D camera over the same live values. Click for a still frame.
+
+[![Sketchbook with a rotating 3D view alongside source, shared state, runnable documentation, and the REPL](screenshots/sketchbook-3d.gif)](screenshots/sketchbook-3d.png)
+
+<details>
+<summary>Tools and commands</summary>
+
+Install tools and toolsets, or choose themes, workspaces, and compositions.
+
+![Tools manager with toolsets and available applets](screenshots/tools.png)
+
+Find actions with `M-x`.
+
+![Searchable command center with keyboard shortcuts](screenshots/commands.png)
+
+</details>
 
 ### Differences from emacs
 
