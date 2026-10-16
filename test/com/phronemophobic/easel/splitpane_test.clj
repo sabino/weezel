@@ -3,7 +3,9 @@
             [com.phronemophobic.easel :as easel]
             [com.phronemophobic.easel.applet :as applet]
             [com.phronemophobic.easel.model :as model]
-            [com.phronemophobic.easel.splitpane :as pane]))
+            [com.phronemophobic.easel.splitpane :as pane]
+            [membrane.component :as component]
+            [membrane.ui :as ui]))
 
 (deftest constrained-layout
   (doseq [direction [:row :column]
@@ -56,3 +58,57 @@
     (is (= 1 (:applet-id (pane/find-pane-by-id moved :b))))
     (is (= root (pane/assign-applet root :missing 1)))
     (is (= root (pane/assign-applet root :root 1)))))
+
+(deftest explicit-ids-and-stale-pane-targets
+  (let [factory (fn [_] (applet/tool-applet "Test" (constantly (ui/label "ready")) {}))
+        base (assoc (easel/make-easel) :$ref '(keypath :easel))
+        first-applet (model/-add-applet base {:id 17 :pane-id :missing :make-applet factory})
+        next-applet (model/-add-applet first-applet {:from-pane-id :com.phronemophobic.easel/root-pane
+                                                    :make-applet factory})]
+    (is (= #{17 18} (into #{} (map :id) (model/-visible-applets next-applet))))
+    (is (thrown-with-msg? clojure.lang.ExceptionInfo #"already in use"
+                          (model/-add-applet first-applet {:id 17 :make-applet factory})))
+    (is (= [0 0] (:size (model/-resize next-applet [-10 -20] [1 1]))))))
+
+(deftest closed-applets-stay-closed-in-saved-workspaces
+  (let [base (-> (easel/make-easel) (assoc :$ref '(keypath :easel))
+                 (model/-add-applet {:make-applet (fn [_] (applet/tool-applet "Test" identity {}))}))
+        id (first (keys (:applets base)))
+        state (atom {:easel (assoc-in base [:root-pane :drag-state] {:to-pane :old})})
+        handler (component/default-handler state)]
+    (handler ::easel/save-workspace {:$easel '(keypath :easel)})
+    (is (nil? (get-in @state [:easel :workspaces :by-id 1 :root-pane :drag-state])))
+    (swap! state update :easel model/-remove-applet id)
+    (handler ::easel/select-workspace {:$easel '(keypath :easel) :workspace-id 1})
+    (is (empty? (get-in @state [:easel :applets])))
+    (is (every? #(nil? (:applet-id %)) (pane/flatten-pane (get-in @state [:easel :root-pane]))))
+    (let [before @state]
+      (handler ::easel/select-workspace {:$easel '(keypath :easel) :workspace-id :missing})
+      (is (= before @state)))))
+
+(deftest failed-applets-can-be-retried
+  (let [calls (atom 0)
+        factory (fn [_]
+                  (if (= 1 (swap! calls inc))
+                    (throw (IllegalStateException. "initial failure"))
+                    (applet/tool-applet "Recovered" (constantly (ui/label "ready")) {})))
+        base (-> (easel/make-easel) (assoc :$ref '(keypath :easel))
+                 (model/-add-applet {:make-applet factory}))
+        state (atom {:easel base}) handler (component/default-handler state)
+        id (first (keys (:applets base)))]
+    (is (instance? Throwable (get-in @state [:easel :applets id ::applet/error])))
+    (is (every? number? (ui/bounds (applet/safe-ui (get-in @state [:easel :applets id]) nil {}))))
+    (handler ::easel/retry-applet {:$easel '(keypath :easel) :id id})
+    (is (= "Recovered" (get-in @state [:easel :applets id :label])))
+    (is (nil? (get-in @state [:easel :applets id ::applet/error])))))
+
+(deftest stale-references-cannot-modify-replacement-applets
+  (let [factory (fn [_] (applet/tool-applet "Test" identity {}))
+        base (-> (easel/make-easel) (assoc :$ref '(keypath :easel))
+                 (model/-add-applet {:id 1 :make-applet factory}))
+        old-ref (get-in base [:applets 1 :$ref])
+        state (atom {:easel (-> base (model/-remove-applet 1)
+                                (model/-add-applet {:id 1 :make-applet factory}))})
+        handler (component/default-handler state)]
+    (handler :update [old-ref '(keypath :state)] assoc :stale true)
+    (is (nil? (get-in @state [:easel :applets 1 :state :stale])))))

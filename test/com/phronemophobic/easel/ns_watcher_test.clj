@@ -40,3 +40,31 @@
     (model/-stop applet)
     (run! #(%) (::model/queue applet))
     (is (not (contains? @watcher/watch-list* (:watch-key applet))))))
+
+(deftest callback-failure-removes-var-watches
+  (let [ns-sym (symbol (str "easel.test." (gensym)))
+        test-ns (create-ns ns-sym) v (intern test-ns 'value 1)
+        key (random-uuid)
+        stop (watcher/watch-ns test-ns key (fn [] (throw (AssertionError. "watch callback"))))]
+    (try
+      (is (await-value #(seq (.getWatches v))))
+      (alter-var-root v inc)
+      (is (await-value #(and (empty? (.getWatches v)) (not (contains? @watcher/watch-list* key)))))
+      (finally (stop) (remove-ns ns-sym)))))
+
+(deftest restarting-a-watch-with-the-same-key
+  (let [ns-sym (symbol (str "easel.test." (gensym)))
+        test-ns (create-ns ns-sym) v (intern test-ns 'value 1)
+        key (random-uuid) calls (atom 0)]
+    (try
+      (watcher/watch-ns test-ns key (fn []))
+      (watcher/unwatch-ns key)
+      (watcher/watch-ns test-ns key #(swap! calls inc))
+      (is (await-value #(= 1 (count (.getWatches v)))))
+      (alter-var-root v inc)
+      (is (await-value #(pos? @calls)))
+      (is (contains? @watcher/watch-list* key))
+      (finally
+        (watcher/unwatch-ns key)
+        (await-value #(empty? (.getWatches v)))
+        (remove-ns ns-sym)))))

@@ -7,6 +7,7 @@
    [membrane.basic-components :as basic]
    [membrane.alpha.component.drag-and-drop :as dnd]
    [com.phronemophobic.easel.model :as model]
+   [com.phronemophobic.easel.events :as events]
    [clojure.core.async :as async]
    [clojure.set :as set]
    [com.phronemophobic.viscous :as viscous]
@@ -22,17 +23,20 @@
       (async/close! (:quit-ch old-watch)))))
 
 (defn watch-ns [ns key cb]
-  (let [[old-watch-list watch-list]
+  (let [initial-interns (ns-interns ns)
+        token (random-uuid)
+        watched-vars (atom #{})
+        [old-watch-list watch-list]
         (swap-vals! watch-list*
                     (fn [watch-list]
                       (if (get watch-list key)
                         watch-list
-                        (assoc watch-list key {:callback-ch (async/chan)
+                        (assoc watch-list key {:token token
+                                               :callback-ch (async/chan (async/sliding-buffer 1))
                                                :quit-ch (async/chan)}))))
 
         {:keys [quit-ch callback-ch]} (get watch-list key)
-        var-change-ch (async/chan (async/dropping-buffer 1))
-        initial-interns (ns-interns ns)]
+        var-change-ch (async/chan (async/dropping-buffer 1))]
 
     (if (get old-watch-list key)
       (async/put! callback-ch cb)
@@ -40,18 +44,16 @@
       (async/go
         (try
           (doseq [[_ var] initial-interns]
-            (add-watch var key
+            (swap! watched-vars conj var)
+            (add-watch var token
                        (fn [_ _ _ _]
                          (async/put! var-change-ch var))))
 
           (loop [old-interns initial-interns
                  cb cb]
             (async/alt!
-              callback-ch ([cb] (recur old-interns cb))
-              quit-ch ([_]
-                       (doseq [[_ var] old-interns]
-                         (remove-watch var key))
-                       nil)
+              quit-ch ([_] nil)
+              callback-ch ([cb] (when cb (recur old-interns cb)))
               var-change-ch ([_]
                              (cb)
                              (recur old-interns cb))
@@ -66,20 +68,24 @@
                                               removed-vars (set/difference old-vars new-vars)
                                               added-vars (set/difference new-vars old-vars)]
                                           (doseq [var removed-vars]
-                                            (remove-watch var key))
+                                            (remove-watch var token)
+                                            (swap! watched-vars disj var))
                                           (doseq [var added-vars]
-                                            (add-watch var key
+                                            (swap! watched-vars conj var)
+                                            (add-watch var token
                                                        (fn [_ _ _ _]
                                                          (async/put! var-change-ch true)))))
 
                                         (cb))
                                       (recur new-interns cb)))
               :priority true))
-          (catch Exception e
-            (prn e))
+          (catch Throwable e
+            (events/report! e))
           (finally
-            (swap! watch-list* dissoc key)
-            (async/close! var-change-ch)))))
+            (doseq [var @watched-vars] (remove-watch var token))
+            (swap! watch-list* #(if (= token (get-in % [key :token])) (dissoc % key) %))
+            (async/close! var-change-ch)
+            (async/close! callback-ch)))))
 
     (fn []
       (async/close! quit-ch))))
@@ -165,7 +171,7 @@
                     (when-not @active? (unwatch-ns watch-key)))))]
              :size size)))
   (-stop [this]
-    (reset! (:active? this) false)
+    (when-let [active? (:active? this)] (reset! active? false))
     (unwatch-ns (:watch-key this))
     nil)
   model/IUI

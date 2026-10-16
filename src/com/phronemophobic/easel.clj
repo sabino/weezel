@@ -10,8 +10,7 @@
             [com.phronemophobic.easel.list-applets :as
              list-applets]
             [com.phronemophobic.easel.splitpane :as splitpane]
-            [com.phronemophobic.easel.term
-             :as term]
+            [com.phronemophobic.easel.applet :as applet]
             [com.phronemophobic.membrandt :as ant]
             [com.phronemophobic.membrandt.icon.ui :as icon.ui]
             [com.phronemophobic.easel.model :as model]
@@ -54,7 +53,12 @@
 
 (defonce app-starter-executor
   (delay
-    (Executors/newSingleThreadExecutor)))
+    (Executors/newSingleThreadExecutor
+     (reify java.util.concurrent.ThreadFactory
+       (newThread [_ runnable]
+         (doto (Thread. runnable "easel-applets") (.setDaemon true)))))))
+
+(defonce queue-scheduled? (atom false))
 
 (def ^:private QUEUES-PATH
   (specter/path
@@ -71,21 +75,40 @@
 
 (defn ^:private run-queue []
   (let [[old new] (swap-vals! app-state purge-queue)
-        queue (specter/select [QUEUES-PATH specter/ALL] old)]
-    (run! (fn [work]
+        queue (concat
+               (for [[id applet] (get-in old [:easel :applets]) work (::model/queue applet)]
+                 [id (::instance-token applet) work])
+               (for [work (get-in old [:easel ::queue])] [nil nil work]))]
+    (run! (fn [[id token work]]
             (try
               (work)
               (catch Throwable e
                 (events/report! e)
-                (println e))))
+                (when id
+                  (swap! app-state
+                         #(if (and (get-in % [:easel :applets id])
+                                   (= token (get-in % [:easel :applets id ::instance-token])))
+                            (assoc-in % [:easel :applets id ::applet/error] e)
+                            %))))))
           queue)))
+
+(defn- schedule-queue []
+  (when (compare-and-set! queue-scheduled? false true)
+    (.submit ^ExecutorService @app-starter-executor
+             ^Runnable
+             (fn []
+               (try
+                 (run-queue)
+                 (finally
+                   (reset! queue-scheduled? false)
+                   (when (seq (specter/select [QUEUES-PATH specter/ALL] @app-state))
+                     (schedule-queue))))))))
 
 (add-watch app-state ::applet-queue
            (fn [key ref old new]
              (let [has-queue? (not= specter/NONE (specter/select-any QUEUES-PATH new))]
                (when has-queue?
-                 (.submit ^ExecutorService @app-starter-executor
-                          run-queue)))))
+                 (schedule-queue)))))
 
 (defeffect ::add-applet [m]
   (dispatch!
@@ -165,21 +188,7 @@
                      :context context
                      :$context $context
                      :scroll-bounds scroll-bounds))]
-      (ui/translate
-       4 4
-       (ui/try-draw
-        (try
-          ui
-          (catch Exception e
-            (events/report! e)
-            (tap> e)
-            (prn e)
-            (ui/label "Error!")))
-        (fn [draw e]
-          (events/report! e)
-          (tap> e)
-          (prn e)
-          (draw (ui/label "Error!")))))))
+      (ui/translate 4 4 ui)))
   model/IResizable
   (-resize [this size _content-scale]
     (assoc this
@@ -692,7 +701,7 @@
                                                    m
                                                    (assoc m :pane-id (:id pane)))]])
 
-                                             (model/-ui applet $context context)))
+                                             (applet/safe-ui applet $context context)))
                                            ;; no applet found
                                            (let [pane-id (:id pane)
                                                  list-applets-extra (get extra [::list-applets-extra pane-id])
@@ -730,23 +739,33 @@
 
 
 
+(defn- create-applet [factory]
+  (try
+    (let [applet (factory handler)]
+      (when-not (every? #(satisfies? % applet) [model/IApplet model/IUI model/IResizable])
+        (throw (ex-info "Applet does not implement the applet protocols" {})))
+      applet)
+    (catch Throwable e
+      (assoc (applet/tool-applet "Applet" identity {}) ::applet/error e))))
+
 (defrecord AEasel [applets
                    last-id $ref
                    root-pane]
   model/IEasel
   (-add-applet [this info]
     (let [{:keys [make-applet pane-id pop-out? from-pane-id]} info
-          applet (make-applet handler)
           id (or (:id info)
                  (inc last-id))
-          new-last-id (if (:id info)
-                        last-id
-                        id)
-          applet (assoc applet :id id)
+          _ (when (contains? applets id)
+              (throw (ex-info "Applet id is already in use" {:id id})))
+          new-last-id (if (integer? id) (max id last-id) last-id)
+          applet (assoc (create-applet make-applet) :id id ::factory make-applet
+                        ::instance-token (random-uuid) :render-error* (atom nil))
+          target (when pane-id (splitpane/find-pane-by-id root-pane pane-id))
           root-pane (cond
                       
                       (and (not pop-out?)
-                             pane-id)
+                           target (empty? (:panes target)))
                       (splitpane/edit-pane-by-id root-pane pane-id
                                                  #(assoc % :applet-id id))
                       
@@ -754,7 +773,7 @@
                       (let [from-zpane (zfind (splitpane/pane-zip root-pane)
                                               (fn [pane]
                                                 (= (:id pane) from-pane-id)))]
-                        (if from-zpane
+                        (if (and from-zpane (z/up from-zpane))
                           (-> from-zpane
                               (z/insert-right {:id (random-uuid)
                                                :applet-id id})
@@ -783,15 +802,22 @@
       (-> this
           (update :applets dissoc id)
           (assoc :root-pane root-pane)
+          (update-in [:workspaces :by-id]
+                     (fn [workspaces]
+                       (into {} (map (fn [[key workspace]]
+                                       [key (update workspace :root-pane
+                                                    #(specter/transform [splitpane/WALK-PANE
+                                                                         (fn [pane] (= id (:applet-id pane)))]
+                                                                        (fn [pane] (dissoc pane :applet-id)) %))]))
+                             workspaces)))
           (update ::queue
                   (fnil conj [])
                   (fn []
                     (when applet
                       (try
                         (model/-stop applet)
-                        (catch Exception e
-                          (println "Error when closing applet:")
-                          (prn e))))))
+                        (catch Throwable e
+                          (events/report! e))))))
           relayout*)))
   (-show-applet [this id]
     (if (or (not (contains? applets id))
@@ -835,8 +861,8 @@
                       ;; pane already has children
                       root-pane)
           root-pane (-> root-pane
-                        (assoc :width w
-                               :height h))
+                        (assoc :width (max 0 w)
+                               :height (max 0 h)))
           root-pane-layout (splitpane/layout-pane-nested root-pane top-bar-height)
           all-panes (splitpane/flatten-pane-nested root-pane-layout)
           cached-layout {:all-panes all-panes
@@ -849,7 +875,7 @@
                                all-panes)}
 
           this (assoc this
-                      :size [w h]
+                      :size [(max 0 w) (max 0 h)]
                       :root-pane root-pane
                       ::cached-layout cached-layout
                       :content-scale content-scale)
@@ -858,18 +884,24 @@
                        (let [new-size [(:width pane)
                                        (max 0
                                             (- (:height pane) top-bar-height))]]
-                         (if (::applet-started? applet)
-                           (model/-resize applet
-                                          new-size
-                                          content-scale)
-                           (-> applet
-                               (model/-start (specter/path
-                                               (membrane.component/path->spec $ref)
-                                               (specter/keypath :applets)
-                                               (specter/must (:id applet)))
-                                             new-size
-                                             content-scale)
-                               (assoc ::applet-started? true)))))
+                         (if (::applet/error applet)
+                           (assoc applet :size new-size)
+                           (try
+                             (if (::applet-started? applet)
+                               (model/-resize applet
+                                              new-size
+                                              content-scale)
+                               (-> applet
+                                   (model/-start (specter/path
+                                                 (membrane.component/path->spec $ref)
+                                                 (specter/keypath :applets)
+                                                 (specter/must (:id applet))
+                                                 (specter/pred #(= (::instance-token applet) (::instance-token %))))
+                                                new-size
+                                                content-scale)
+                                   (assoc ::applet-started? true)))
+                             (catch Throwable e
+                               (assoc applet :size new-size ::applet/error e))))))
                      applets
                      (transduce
                       (filter (fn [pane]
@@ -887,6 +919,20 @@
     (let [extra (get this ::extra)
           $extra [$ref (list 'keypath ::extra)]]
       (easel-ui* this $extra extra $context context))))
+
+(defeffect ::retry-applet [{:keys [$easel id]}]
+  (dispatch! :update $easel
+             (fn [easel]
+               (if-let [old (get-in easel [:applets id])]
+                 (if-let [factory (::factory old)]
+                   (-> easel
+                       (assoc-in [:applets id] (assoc (create-applet factory) :id id ::factory factory
+                                                    ::instance-token (random-uuid)
+                                                    :render-error* (atom nil)))
+                       (update ::queue (fnil conj []) #(model/-stop old))
+                       relayout*)
+                   easel)
+                 easel))))
 
 (defn make-easel []
   (-> (map->AEasel
@@ -948,7 +994,8 @@
                          (let [next-id (inc last-id)
 
                                root-pane (:root-pane easel)
-                               new-workspace {:root-pane (dissoc root-pane :width :height)
+                               new-workspace {:root-pane (dissoc root-pane :width :height :drag-state ::pane-resize)
+                                              :name (str next-id)
                                               :id next-id}]
                            (-> workspaces
                                (update :by-id assoc next-id new-workspace)
@@ -965,19 +1012,18 @@
 (defeffect ::select-workspace [{:keys [$easel workspace-id]}]
   (dispatch! :update $easel
              (fn [easel]
-               (let [
-
-                     workspace (-> easel :workspaces :by-id (get workspace-id))
+               (if-let [workspace (-> easel :workspaces :by-id (get workspace-id))]
+                 (let [
                      workspace-root-pane (:root-pane workspace)
 
                      {:keys [width height]} (:root-pane easel)
                      workspace-root-pane (assoc workspace-root-pane
                                                 :width width
                                                 :height height)]
-                 (assert workspace-root-pane)
                  (-> easel
                      (assoc :root-pane workspace-root-pane)
-                     relayout*)))))
+                     relayout*))
+                 easel))))
 
 (defeffect ::delete-workspace [{:keys [$easel workspace-id]}]
   (dispatch! :update
@@ -986,7 +1032,7 @@
                (update-in easel [:workspaces :by-id]
                           dissoc workspace-id))))
 
-(defui string-editor [{:keys [string edit-string
+(defui string-editor [{:keys [string edit-string on-select
                               last-click
                               ^:membrane.component/contextual
                               focus] :as m}]
@@ -995,9 +1041,9 @@
       (ui/wrap-on
        :key-press
        (fn [handler s]
-         (if (= s :enter)
-           [[:set $focus nil]
-            [:set $string edit-string]]
+         (case s
+           :enter [[:set $focus nil] [:set $string edit-string]]
+           :escape [[:set $focus nil]]
            (handler s)))
        (ui/horizontal-layout
         (ui/on
@@ -1018,7 +1064,7 @@
                        500))
              [[:set $focus $string]
               [:set $edit-string string]]
-             [[:set $last-click t]])))
+             (into [[:set $last-click t]] (when on-select (on-select))))))
        (ui/label string)))))
 
 (defui workspace-view [{:keys [workspaces width]}]
@@ -1044,7 +1090,8 @@
                    editing-name? (get extra [::editing? (:id workspace)])
 
                    lbl (string-editor {:string (get workspace :name (str workspace-id))
-                                       :editing editing-name?})
+                                       :$string [$workspaces '(keypath :by-id) (list 'keypath workspace-id) '(keypath :name)]
+                                       :on-select #(vector [::select-workspace {:workspace-id workspace-id}])})
                    lbl (ui/center lbl
                                   (ui/bounds background))
 
@@ -1125,6 +1172,7 @@
       $easel
       #{::toggle-pane-direction
         ::balance-panes
+        ::retry-applet
         ::add-pane-child
         ::delete-pane
         ::close-other-panes
@@ -1197,7 +1245,7 @@
   (swap! app-state
          update :easel
          model/-add-applet {:make-applet (fn [_]
-                                           (term/termlet handler))})
+                                           ((requiring-resolve 'com.phronemophobic.easel.term/termlet) handler))})
   nil)
 
 (defn add-browser [url]
