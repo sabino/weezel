@@ -23,6 +23,34 @@
   (loop [n 500]
     (or (f) (when (pos? n) (Thread/sleep 10) (recur (dec n))))))
 
+(deftest pane-menu-renders-and-splits-an-empty-workspace
+  (let [directory (fixtures/temporary-directory) previous @easel/app-state]
+    (try
+      (binding [settings/*directory* directory]
+        (reset! easel/app-state {:easel (assoc (easel/make-easel) :$ref '(keypath :easel))})
+        (swap! easel/app-state update :easel easel/resize-window [900 700] [1 1])
+        (let [app (component/make-app #'easel/easel-view easel/app-state easel/handler)
+              nodes #(tree-seq (fn [node] (seq (ui/children node))) ui/children (app))
+              click (fn [text]
+                      (let [button (some #(when (and (= text (:text %)) (:on-click %)) %) (nodes))]
+                        (is (some? button) text)
+                        (when button (run! #(apply easel/handler %) (ui/mouse-down button [5 5])))))]
+          (click "⋯")
+          (is (every? #(every? number? (ui/bounds %)) (nodes)))
+          (let [close (some #(when (= "Close applet" (:text %)) %) (nodes))]
+            (is (true? (:disabled? close)))
+            (is (empty? (ui/mouse-down close [5 5]))))
+          (click "Split right")
+          (is (every? #(every? number? (ui/bounds %)) (nodes)))
+          (is (= 2 (count (splitpane/flatten-pane (get-in @easel/app-state [:easel :root-pane])))))
+          (is (nil? (get-in @easel/app-state [:easel :pane-menu])))
+          (easel/handler ::easel/toggle-pane-resize {:$easel '(keypath :easel) :pane-id ::easel/root-pane})
+          (is (every? #(every? number? (ui/bounds %)) (nodes)))
+          (ui/mouse-up (app) [200 200])
+          (easel/handler ::easel/toggle-pane-resize {:$easel '(keypath :easel) :pane-id ::easel/root-pane})))
+      (finally (reset! easel/app-state previous)
+               (fixtures/delete-directory! directory)))))
+
 (deftest command-line-entrypoint-waits-for-window-close
   (let [directory (fixtures/temporary-directory)
         startup (io/file directory "startup.clj")

@@ -733,7 +733,7 @@
                  ["Hide pane" [::hide-pane {:pane-id pane-id}]]
                  ["Close other panes" [::close-other-panes {:pane-id pane-id}]]
                  ["Close applet" [::close-applet applet-id]]]]
-    (ui/vertical-layout
+    (apply ui/vertical-layout
      (for [[label intent] actions]
        (eui/button {:text label :width width :height 34 :variant :text
                     :disabled? (and (= label "Close applet") (nil? applet-id))
@@ -768,7 +768,7 @@
                                  :on-click #(vector [::add-to-pane (:id pane)]) })))))
             (eui/border context w h)]))))
      (when (::pane-resize (:root-pane easel))
-       (pane-resizer {:root-pane-layout (-> easel ::cached-layout :root-pane-layout)
+       (pane-resizer {:root-pane (-> easel ::cached-layout :root-pane-layout)
                      :extra (get extra ::pane-resizer)
                      :$extra [$extra (list 'keypath ::pane-resizer)]
                      :context context :$context $context}))
