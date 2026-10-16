@@ -278,6 +278,8 @@
 
 (defui link-view [{:keys [state target]}]
   (applet/button {:text (link-label target) :size :small
+                  :extra (get extra [::link target])
+                  :$extra [$extra (list 'keypath [::link target])]
                   :on-click #(vector [::navigate $state target])}))
 
 (defn- prose [text width]
@@ -307,13 +309,19 @@
                (ui/padding 0 6 (eui/label source {:role :code :size 12}))
                (row-layout width
                 [(applet/button {:text "Run" :size :small
+                                  :extra (get extra [::example id :run])
+                                  :$extra [$extra (list 'keypath [::example id :run])]
                                   :disabled? (or (not (:ready? state)) (:busy? state))
                                   :on-click #(vector [::run-example $state id source])})
                  (applet/button {:text "Edit in Clobber" :size :small
+                                  :extra (get extra [::example id :edit])
+                                  :$extra [$extra (list 'keypath [::example id :edit])]
                                   :disabled? (not (:ready? state))
                                   :on-click #(example-intents source (:example-ns state))})
                  (when result
                    (applet/button {:text "Inspect result" :size :small
+                                    :extra (get extra [::example id :inspect])
+                                    :$extra [$extra (list 'keypath [::example id :inspect])]
                                     :on-click #(inspect-intents @(or (:exception result) (:value result)))}))])
                (when result
                  (ui/vertical-layout
@@ -391,6 +399,8 @@
                           {:keys [kind meta]} (describe-var v)]
                       (applet/button {:text (str sym " · " (name kind) (when (:private meta) " · private"))
                                       :size :small
+                                      :extra (get extra [::member (var-symbol v)])
+                                      :$extra [$extra (list 'keypath [::member (var-symbol v)])]
                                       :on-click #(vector [::navigate $state {:kind :var :symbol (var-symbol v)}])})))})
        (when (seq (ns-aliases ns))
          (ui/vertical-layout

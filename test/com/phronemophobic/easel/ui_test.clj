@@ -1,6 +1,7 @@
 (ns com.phronemophobic.easel.ui-test
   (:require [clojure.test :refer [deftest is testing]]
             [com.phronemophobic.easel.diff :as diff]
+            [com.phronemophobic.easel.documentation :as documentation]
             [com.phronemophobic.easel.exceptions :as exceptions]
             [com.phronemophobic.easel.flowstorm :as flowstorm]
             [com.phronemophobic.easel.git :as git]
@@ -75,6 +76,51 @@
 
 (defn view-nodes [view]
   (tree-seq #(seq (ui/children %)) ui/children view))
+
+(defn button-frames
+  ([view] (button-frames view [0 0]))
+  ([view [x y]]
+   (let [[ox oy] (ui/origin view)
+         x (+ x ox) y (+ y oy)
+         button (when (instance? com.phronemophobic.easel.ui.Button view)
+                  {:text (:text view) :hover? (:hover? view) :disabled? (:disabled? view)
+                   :x x :y y :size (ui/bounds view)})
+         [dx dy] (cond
+                   (instance? membrane.ui.Padding view) [(:left view) (:top view)]
+                   (instance? membrane.ui.ScrollView view) (:offset view)
+                   :else [0 0])]
+     (into (if button [button] [])
+           (mapcat #(button-frames % [(+ x dx) (+ y dy)])) (ui/children view)))))
+
+(defn move-pointer [app position]
+  (let [view (app)]
+    (ui/mouse-move view position)
+    (ui/mouse-move-global view position)))
+
+(deftest documentation-controls-have-independent-hover-state
+  (doseq [[view args]
+          [[#'documentation/target-view
+            {:state (assoc (documentation/initial-state) :target {:kind :guide :id :start} :ready? true)
+             :width 800}]
+           [#'documentation/target-view
+            {:state (assoc (documentation/initial-state) :target {:kind :namespaces}
+                           :namespaces '[clojure.core com.phronemophobic.easel.model]) :width 800}]
+           [#'documentation/namespace-view
+            {:state (documentation/initial-state) :target {:kind :namespace :symbol 'com.phronemophobic.easel.model}
+             :width 800}]
+           [#'documentation/examples-view
+            {:state {:ready? true} :target {:kind :guide :id :start} :width 800
+             :examples [{:source "1"} {:source "2"}]}]]]
+    (testing (str view)
+      (let [state (atom args)
+            app (component/make-app view state)
+            active #(mapv (juxt :text :x :y) (filter :hover? (button-frames (app))))]
+        (doseq [{:keys [text x y size disabled?]} (button-frames (app)) :when (not disabled?)]
+          (move-pointer app [(+ x 4) (+ y (/ (second size) 2))])
+          (is (= [[text x y]] (active)) text))
+        (move-pointer app [-20 -20])
+        (is (empty? (active)))
+        (is (= (:state args) (:state @state)))))))
 
 (deftest large-diffs-render-in-pages
   (let [patch (str "@@ -1,10000 +1,10000 @@\n"
