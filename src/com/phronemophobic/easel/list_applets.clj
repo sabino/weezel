@@ -36,6 +36,9 @@
                      (catch Exception e
                        nil)))]
     (ui/vertical-layout
+     (button {:text "Documentation"
+              :on-click #(vector [:com.phronemophobic.easel/add-applet
+                                  {:make-applet (requiring-resolve 'com.phronemophobic.easel.documentation/documentation-applet)}])})
      (ui/flex-layout
       [(para/paragraph
         "eval-ns: "
