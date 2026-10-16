@@ -1,5 +1,5 @@
 {:easel/commands
- {:id :easel/commands :name "Find a tool or command" :icon "search"
+ {:id :easel/commands :name "Find a tool or command" :icon "search" :palette? false
   :intents [[:com.phronemophobic.easel/show-commands ""]]}
  :easel/help
  {:id :easel/help :name "Getting started and shortcuts" :icon "question-circle"
@@ -9,13 +9,18 @@
   :enabled? com.phronemophobic.easel.commands/cancellable?
   :intents [[:com.phronemophobic.easel/cancel]]}
  :easel/new-editor
- {:id :easel/new-editor :name "New blank editor" :icon "file-text"
-  :intents [[:com.phronemophobic.easel/new-editor]]}
+ {:id :easel/new-editor :name "New blank editor" :icon "file-text" :category :applet :order 0
+  :keywords ["Clobber" "Clojure"] :description "Create a fresh Clojure buffer in the selected pane."
+  :intents [[:com.phronemophobic.easel/new-editor-in-pane ?pane-id]]}
  :easel/open-repl
- {:id :easel/open-repl :name "Open REPL" :icon "code"
+ {:id :easel/open-repl :name "Open REPL" :icon "code" :category :applet :order 1
+  :description "Show the workspace REPL, reusing the running session."
+  :enabled? com.phronemophobic.easel.commands/repl-configured?
+  :disabled-reason "This composition has no REPL slot."
   :intents [[:com.phronemophobic.easel/close-tools] [:com.phronemophobic.easel/select-dock :repl]]}
  :easel/tools
- {:id :easel/tools :name "Tools and themes" :icon "appstore"
+ {:id :easel/tools :name "Manage tools and packages" :order 2
+  :description "Install applets and toolsets; choose themes, compositions, and keymaps." :icon "appstore"
   :intents [[:com.phronemophobic.easel/open-tools]]}
  :easel/compositions
  {:id :easel/compositions :name "Choose a composition" :icon "layout"
@@ -25,6 +30,8 @@
   :intents [[:com.phronemophobic.easel/manage-packages :keymap]]}
  :easel/toggle-dock
  {:id :easel/toggle-dock :name "Toggle dock" :icon "layout"
+  :enabled? com.phronemophobic.easel.commands/dock-present?
+  :disabled-reason "This composition has no dock."
   :intents [[:com.phronemophobic.easel/toggle-dock]]}
  :easel/save-workspace
  {:id :easel/save-workspace :name "Save workspace" :icon "save"
@@ -36,21 +43,30 @@
  {:id :easel/split-below :name "Split below"
   :intents [[:com.phronemophobic.easel/split-direction {:pane-id ?pane-id :direction :column}]]}
  :easel/balance-panes
- {:id :easel/balance-panes :name "Balance panes" :icon "border"
+ {:id :easel/balance-panes :name "Balance panes"
+  :enabled? com.phronemophobic.easel.commands/multiple-panes?
+  :disabled-reason "Split the workspace into multiple panes first." :icon "border"
   :intents [[:com.phronemophobic.easel/balance-panes {:$easel ?$easel :pane-id ?root-pane-id}]]}
  :easel/resize-panes
  {:id :easel/resize-panes :name "Resize panes"
+  :enabled? com.phronemophobic.easel.commands/multiple-panes?
+  :disabled-reason "Split the workspace into multiple panes first."
   :intents [[:com.phronemophobic.easel/toggle-pane-resize {:$easel ?$easel :pane-id ?root-pane-id}]]}
  :easel/hide-pane
  {:id :easel/hide-pane :name "Hide pane"
+  :enabled? com.phronemophobic.easel.commands/child-pane?
+  :disabled-reason "The workspace needs at least one pane."
   :intents [[:com.phronemophobic.easel/hide-pane {:$easel ?$easel :pane-id ?pane-id}]]}
  :easel/close-other-panes
  {:id :easel/close-other-panes :name "Close other panes"
+  :enabled? com.phronemophobic.easel.commands/multiple-panes?
+  :disabled-reason "Split the workspace into multiple panes first."
   :intents [[:com.phronemophobic.easel/close-other-panes {:$easel ?$easel :pane-id ?pane-id}]]}
  :easel/close-applet
  {:id :easel/close-applet :name "Close applet"
   :enabled? com.phronemophobic.easel.commands/applet-present?
+  :disabled-reason "Select a pane containing an applet first."
   :intents [[:com.phronemophobic.easel/close-applet ?applet-id]]}
  :easel/add-applet
- {:id :easel/add-applet :name "Add applet" :icon "plus"
+ {:id :easel/add-applet :name "Add applet" :icon "plus" :palette? false
   :intents [[:com.phronemophobic.easel/add-to-pane ?pane-id]]}}

@@ -2,6 +2,7 @@
   (:require [clojure.string :as str]
             [com.phronemophobic.easel.theme :as theme]
             [com.phronemophobic.easel.composition :as composition]
+            [com.phronemophobic.easel.commands :as command]
             [com.phronemophobic.easel.keymap :as keymap]
             [com.phronemophobic.easel.help :as help]
             [com.phronemophobic.easel.ui :as eui]
@@ -145,29 +146,69 @@
                                                   (keymap/shortcut (keymap/current easel) :easel/help) " Help"))
                     :width 330 :size 11 :color :color/secondary})))]))
 
-(defui command-palette [{:keys [commands query selection width]}]
-  (let [matches (take 12 (filter #(str/includes? (str/lower-case (:name %)) (str/lower-case query)) commands))
-        index (max 0 (min (or selection 0) (dec (count matches))))
-        panel-width (min 600 (max 200 (- width 40)))
+(defui command-row [{:keys [command width selected? on-click hover?]}]
+  (let [disabled? (:disabled? command)
+        color (if disabled? :color/muted :color/text)
+        description (if disabled? (:disabled-reason command) (:description command))]
+    (basic/on-hover
+     {:hover? hover? :$body nil
+      :body
+      (ui/on :mouse-down (fn [_] (when-not disabled? (on-click)))
+        (ui/fixed-bounds [width 56]
+          [(when (or selected? hover?)
+             (eui/surface context width 56 (if selected? :color/selection :color/hover) 4))
+           (ui/translate 12 9
+             (eui/text {:text (:name command) :color color :width (max 1 (- width 110)) :size 14}))
+           (when (seq (:shortcut command))
+             (ui/translate (max 12 (- width 88)) 10
+               (eui/text {:text (:shortcut command) :role :code :size 11 :color :color/secondary})))
+           (when (seq description)
+             (ui/translate 12 31
+               (ui/scissor-view [0 0] [(max 1 (- width 24)) 18]
+                 (eui/text {:text description :width (max 1 (- width 24)) :size 11 :color :color/secondary}))))]))})))
+
+(defui command-palette [{:keys [commands query selection width height category]}]
+  (let [matches (command/matching commands query category)
+        count-matches (count matches)
+        available (vec (keep-indexed #(when-not (:disabled? %2) %1) matches))
+        index (if (and (map? selection) (= query (:query selection)))
+                (max 0 (min (:index selection 0) (max 0 (dec count-matches)))) (or (first available) 0))
+        move (fn [delta]
+               (when (seq available)
+                 (let [position (.indexOf available index)
+                       next-index (nth available (mod (+ (max 0 position) delta) (count available)))]
+                   [[:set $selection {:query query :index next-index}]])))
+        panel-width (max 1 (min 680 (- width 32)))
+        rows (max 1 (min 9 (int (/ (- (or height 700) 180) 56))))
+        start (max 0 (- index (dec rows)))
+        visible (subvec matches start (min count-matches (+ start rows)))
+        run (fn [command] (when-not (:disabled? command) (:intents command)))
         content (ui/vertical-layout
-                  (eui/field {:text query :width (- panel-width 32) :placeholder "Find a tool or command…"
+                  (eui/field {:text query :width (max 1 (- panel-width 32))
+                              :placeholder (if category "Find an applet…" "Find a tool or command…")
                               :focus-id ::command-query
-                              :on-key (fn [key] (case key
-                                                 :down [[:set $selection (min (dec (count matches)) (inc index))]]
-                                                 :up [[:set $selection (max 0 (dec index))]] nil))
-                              :on-submit #(when-let [command (nth (vec matches) index nil)] (:intents command))
+                              :on-key (fn [key] (case key :down (move 1) :up (move -1) nil))
+                              :on-submit #(when-let [command (nth matches index nil)] (run command))
                               :on-escape #(vector [:com.phronemophobic.easel/hide-commands])})
-                  (ui/spacer 0 12)
-                  (apply ui/vertical-layout
-                         (for [[i command] (map-indexed vector matches)]
-                           (eui/button {:text (:name command) :icon (:icon command) :variant :text
-                                        :selected? (= i index) :disabled? (:disabled? command)
-                                        :width (- panel-width 32) :height 40 :on-click #(:intents command)}))))
+                  (ui/spacer 0 8)
+                  (if (seq visible)
+                    (apply ui/vertical-layout
+                      (for [[i command] (map-indexed vector visible)]
+                        (command-row {:command command :width (max 1 (- panel-width 32))
+                                      :selected? (= (+ start i) index) :on-click #(run command)
+                                      :extra (get extra (:id command))
+                                      :$extra [$extra (list 'keypath (:id command))]})))
+                    (ui/padding 12 16 (eui/text {:text "No matching commands." :color :color/secondary})))
+                  (ui/spacer 0 8)
+                  (eui/text {:text (str (if (pos? count-matches) (inc index) 0) " / " count-matches
+                                         "   ·   ↑ ↓ select   ·   Enter run   ·   Esc close")
+                              :width (max 1 (- panel-width 32)) :size 11 :color :color/secondary}))
         panel-height (+ 32 (ui/height content))]
-    (ui/fixed-bounds [panel-width panel-height]
-      [(eui/surface context panel-width panel-height :color/surface 8)
-       (eui/border context panel-width panel-height :color/border 8)
-       (ui/translate 16 16 content)])))
+    (ui/on :scroll (fn [[_ dy] _] (move (if (pos? dy) -1 1)))
+      (ui/fixed-bounds [panel-width panel-height]
+        [(eui/surface context panel-width panel-height :color/surface 8)
+         (eui/border context panel-width panel-height :color/border 8)
+         (ui/translate 16 16 content)]))))
 
 (defui panes-view [{:keys [body]}] body)
 (defui manager-view [{:keys [manager-body]}] manager-body)
@@ -178,11 +219,12 @@
 (defui commands-overlay [{:keys [easel commands width height]}]
   [(ui/on :mouse-down (fn [_] [[:com.phronemophobic.easel/hide-commands]])
           (ui/filled-rectangle [0 0 0 0.12] width height))
-   (ui/translate (max 0 (/ (- width (min 600 (max 200 (- width 40)))) 2)) (min 80 (* height 0.1))
+   (ui/translate (max 0 (/ (- width (max 1 (min 680 (- width 32)))) 2)) (min 80 (* height 0.1))
      (command-palette {:commands commands :query (get-in easel [:commands :query] "")
                        :selection (get-in easel [:commands :selection] 0)
                        :$selection [$easel '(keypath :commands) '(keypath :selection)]
-                       :$query [$easel '(keypath :commands) '(keypath :query)] :width width}))])
+                       :$query [$easel '(keypath :commands) '(keypath :query)] :width width :height height
+                       :category (get-in easel [:commands :category])}))])
 
 (defui workspace-view [{:keys [easel body dock-body manager-body commands]}]
   (let [[width height :as size] (:viewport easel [1100 800])

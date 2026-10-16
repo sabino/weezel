@@ -20,6 +20,25 @@
   (fixtures/isolated-workspace
    #(try (f) (finally (packages/suspend! easel/handler)))))
 
+(deftest commands-keep-the-pane-that-opened-the-palette
+  (isolated
+   (fn []
+     (easel/initialize! {:preset :easel/empty})
+     (easel/handler ::easel/finish-help)
+     (dotimes [_ 2] (easel/handler ::easel/new-editor))
+     (is (await-value #(not @easel/queue-scheduled?)))
+     (let [easel (:easel @easel/app-state)
+           selected (get-in @easel/app-state [:membrane.component/context :focus])
+           pane-id (:pane-id (easel/command-environment easel {:focus selected}))]
+       (easel/handler ::easel/show-commands "Close applet")
+       (let [state (:easel @easel/app-state)
+             environment (easel/command-environment state {:focus :com.phronemophobic.easel.shell/command-query})]
+         (is (= pane-id (:pane-id environment)))
+         (is (= selected (:applet-id environment))))
+       (easel/handler ::easel/invoke-command :easel/close-applet nil)
+       (is (nil? (get-in @easel/app-state [:easel :applets selected])))
+       (is (= 1 (count (get-in @easel/app-state [:easel :applets]))))))))
+
 (defn badge [{:keys [width height text]}]
   (ui/fixed-bounds [width height] (ui/label text)))
 

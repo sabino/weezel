@@ -771,6 +771,8 @@
                   (ui/translate 20 20
                     (eui/button {:text "Add applet" :icon "plus"
                                  :context context :$context $context
+                                 :extra (get pane-extra ::add-applet)
+                                 :$extra [$pane-extra (list 'keypath ::add-applet)]
                                  :on-click #(vector [::add-to-pane (:id pane)]) })))))
             (eui/border context w h)]))))
      (when (::pane-resize (:root-pane easel))
@@ -781,13 +783,15 @@
      (when menu-pane
        (let [w (min 240 (first (:size easel)))
              menu (pane-actions {:easel easel :pane-id (:id menu-pane) :applet-id (:applet-id menu-pane)
+                                 :extra (get extra ::pane-menu) :$extra [$extra (list 'keypath ::pane-menu)]
                                  :width w :context context :$context $context})
              h (min (second (:size easel)) (ui/height menu))
              x (max 0 (- (+ (:x menu-pane) (:width menu-pane)) w 8))
              y (max 0 (min (+ (:y menu-pane) header-height) (- (second (:size easel)) h)))]
          (ui/translate x y
            [(eui/surface context w h :color/surface 4)
-            (basic/scrollview {:scroll-bounds [w h] :$body nil :body menu})
+            (basic/scrollview {:scroll-bounds [w h] :$body nil :body menu
+                               :extra (get extra ::menu-scroll) :$extra [$extra (list 'keypath ::menu-scroll)]})
             (eui/border context w h :color/border 4)])))]))
 
 (defn- create-applet [factory]
@@ -1259,16 +1263,18 @@
     (dispatch! :update :easel #(refresh-window (dissoc % :help)))
     (dispatch! :set '[(keypath :membrane.component/context) (keypath :focus)] (:previous-focus state))))
 
-(defeffect ::new-editor []
+(defeffect ::new-editor-in-pane [pane-id]
   (dispatch! ::finish-help)
   (dispatch! ::close-tools)
   (let [id (random-uuid)]
     (dispatch! ::add-applet
-               {:id id
+               {:id id :pane-id pane-id
                 :make-applet #(assoc ((requiring-resolve 'com.phronemophobic.easel.clobber/clobber-applet)
                                       % {:ns 'user :string "" :label "untitled.clj"})
                                      :package/id :easel/clobber :package/args [{:ns 'user :string "" :label "untitled.clj"}])})
     (dispatch! ::focus-applet id)))
+
+(defeffect ::new-editor [] (dispatch! ::new-editor-in-pane nil))
 
 (defeffect ::open-documentation []
   (dispatch! ::finish-help)
@@ -1330,7 +1336,7 @@
 
 (defeffect ::add-to-pane [pane-id]
   (dispatch! ::show-commands "")
-  (dispatch! :update :easel assoc-in [:commands :pane-id] pane-id))
+  (dispatch! :update :easel update :commands assoc :pane-id pane-id :category :applet))
 
 (defeffect ::select-dock [slot]
   (dispatch! ::finish-help)
@@ -1371,8 +1377,9 @@
 
 (defn command-environment [easel context]
   (let [panes (filter #(empty? (:panes %)) (get-in easel [::cached-layout :all-panes]))
+        focus (if (:commands easel) (get-in easel [:commands :previous-focus]) (:focus context))
         pane (or (some #(when (= (:id %) (or (:pane-menu easel) (get-in easel [:commands :pane-id]))) %) panes)
-                 (some #(when (= (:applet-id %) (:focus context)) %) panes) (first panes))]
+                 (some #(when (= (:applet-id %) focus) %) panes) (first panes))]
     {:easel easel :context context :pane-id (:id pane) :applet-id (:applet-id pane)
      :easel-path '(keypath :easel)}))
 
@@ -1399,17 +1406,21 @@
   (let [catalog ((requiring-resolve 'com.phronemophobic.easel.packages/catalog))
         installed? (requiring-resolve 'com.phronemophobic.easel.packages/installed?)]
     (concat
-     (for [p (sort-by :name (vals catalog)) :when (= :applet (:kind p))]
+     (for [p (sort-by :name (vals catalog)) :when (and (= :applet (:kind p)) (not (#{:easel/clobber :easel/repl} (:id p))))]
        {:id (keyword (str "easel.open." (namespace (:id p))) (name (:id p)))
-        :name (str (when-not (installed? p) "Install ") (:name p)) :icon (or (:icon p) "plus")
+        :name (str (if (installed? p) "Open " "Install ") (:name p)) :icon (or (:icon p) "plus")
+        :category :applet :description (:description p) :enabled? (not (:restart? p))
+        :disabled-reason "Restart Easel to load this package version."
         :intents (if (installed? p)
                    [[::open-package (:id p) pane-id]]
                    [[::open-tools] [:com.phronemophobic.easel.package-ui/select (:id p)]])})
      (for [p (sort-by :name (vals catalog)) :when (#{:theme :composition :keymap :workspace} (:kind p))]
-       {:id (keyword (str "easel.use." (namespace (:id p))) (name (:id p))) :name (str (name (:kind p)) ": " (:name p)) :icon (:icon p)
+       {:id (keyword (str "easel.use." (namespace (:id p))) (name (:id p))) :name (str (case (:kind p) :theme "Apply theme: " :composition "Use composition: "
+                                                                                                  :keymap "Use keymap: " :workspace "New workspace: ") (:name p))
+        :category (:kind p) :description (:description p) :icon (:icon p)
         :intents [[::use-package (:id p)]]})
      (for [a (vals (:applets easel)) :when (not (:overlay? a))]
-       {:id (keyword "easel.focus" (str (:id a))) :name (str "Show " (:label a)) :icon (or (:icon a) "file")
+       {:id (keyword "easel.focus" (str (:id a))) :name (str "Focus " (:label a)) :category :focus :description "Show the existing applet; keeps its state." :icon (or (:icon a) "file")
         :intents [(if-let [slot (:dock-slot a)] [::select-dock slot] [::focus-applet (:id a)])]}))))
 
 (defn commands [easel context]
@@ -1417,6 +1428,7 @@
     (for [[id descriptor] (sort-by (comp :name val) (command/registry (composition/current easel) environment))
           :when (not (:hidden? descriptor))]
       (assoc descriptor :disabled? (not (command/enabled? descriptor environment))
+                        :shortcut (keymap/shortcut (keymap/current easel) id)
                         :intents [[::invoke-command id (:pane-id environment)]]))))
 
 (defeffect ::invoke-command [id pane-id]

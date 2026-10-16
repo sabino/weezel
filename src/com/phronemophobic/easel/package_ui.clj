@@ -13,24 +13,33 @@
 
 (defn source-kind [p]
   (cond (some :mvn/version (vals (:deps p))) :clojars
-        (or (some :git/url (vals (:deps p))) (str/includes? (:source p "") "github.com")) :git
+        (or (some :git/url (vals (:deps p))) (str/includes? (or (:source p) "") "github.com")) :git
         :else :local))
 
 (defn matches [state]
   (let [page (:page state :discover) kind (:kind state :applet)
         registry (if (= page :updates) (:updates state) (:registry state))]
     (->> (vals registry)
-         (filter #(case page :toolsets (= :toolset (:kind %))
+         (filter #(case page :sources false :toolsets (= :toolset (:kind %))
                         :updates true
                         (= kind (:kind %))))
          (filter #(or (not= page :installed) (packages/installed? %)))
-         (filter #(or (not= page :discover) (not= kind :applet) (not (str/blank? (:query state))) (:featured? %)))
          (filter #(or (= :all (:source-filter state :all)) (= (:source-filter state) (source-kind %))))
          (filter #(str/includes? (str/lower-case (str (:name %) " " (:description %) " " (:id %)))
                                 (str/lower-case (:query state ""))))
          (sort-by #(vector (or (:order %) 100) (:name %))))))
 
+(defn primary-action [p]
+  (case (packages/status p)
+    :restart {:label "Restart required" :disabled? true :action :open}
+    :available {:label "Install" :action :install}
+    {:label (case (:kind p) :theme "Apply theme" :composition "Use composition" :keymap "Use keymap"
+                   :workspace "New workspace" :toolset "Open toolset" :library "Inspect package" "Open applet")
+     :action :open}))
+
 (defn open-package! [handler p]
+  (when-not (packages/installed? p) (throw (ex-info "Install this package first" {:id (:id p)})))
+  (when (:restart? p) (throw (ex-info "Restart Easel to use this package version" {:id (:id p)})))
   (case (:kind p)
     :applet (do (handler :com.phronemophobic.easel/close-tools)
                 (handler :com.phronemophobic.easel/add-applet
@@ -38,20 +47,29 @@
     :theme (packages/select-theme! handler (:id p) true)
     :composition (packages/select-composition! handler (:id p) true)
     :keymap (packages/select-keymap! handler (:id p) true)
+    :library (do (handler :com.phronemophobic.easel/close-tools)
+                 (handler :com.phronemophobic.easel/add-applet
+                          {:make-applet #(packages/make-applet % :easel/inspector [p])}))
+    :toolset (doseq [member (packages/plan (packages/catalog) [(:id p)]) :when (= :applet (:kind member))]
+               (open-package! handler member))
     :workspace (let [id (inc (get-in (handler :get :easel) [:workspaces :last-id] 0))]
                  (handler :update :easel #(-> % (assoc-in [:workspaces :by-id id]
                                                         {:id id :name (:name p) :preset (:id p)})
                                               (assoc-in [:workspaces :last-id] id)))
                  (handler :com.phronemophobic.easel/open-workspace id))
-    nil))
+    (throw (ex-info "This package has no open action" {:id (:id p)}))))
 
 (defeffect ::page [page]
   (when-let [id (:manager-id (dispatch! :get :easel))]
-    (dispatch! :update [:easel :applets (list 'keypath id) :state] assoc :page page :query "")))
+    (dispatch! :update [:easel :applets (list 'keypath id) :state]
+               assoc :page page :query "" :source-filter :all :selected nil :details? false :create? false)))
 
 (defeffect ::select [package-id]
   (when-let [id (:manager-id (dispatch! :get :easel))]
-    (dispatch! :update [:easel :applets (list 'keypath id) :state] assoc :selected package-id :details? true)))
+    (let [p (get (packages/catalog) package-id)]
+      (dispatch! :update [:easel :applets (list 'keypath id) :state]
+                 assoc :selected package-id :details? true :query "" :source-filter :all
+                 :kind (:kind p) :page (if (= :toolset (:kind p)) :toolsets :discover)))))
 
 (defeffect ::new-toolset []
   (when-let [id (:manager-id (dispatch! :get :easel))]
@@ -67,6 +85,13 @@
     (try
      (case action
       :open (open-package! dispatch! p)
+      :source (let [browser (get (packages/catalog) :easel/browser)]
+                (if (packages/installed? browser)
+                  (do (dispatch! :com.phronemophobic.easel/close-tools)
+                      (dispatch! :com.phronemophobic.easel/add-applet
+                                 {:make-applet #(packages/make-applet % :easel/browser [(:source p)])}))
+                  (dispatch! :update $state assoc :selected :easel/browser :details? true :page :discover :kind :applet
+                             :message "Install Browser to open source links inside Easel.")))
       :pin (do (packages/pin! id (not (get-in (settings/read-settings) [:pins id])))
                (dispatch! :update $state assoc :pins (:pins (settings/read-settings))))
       :preview (do (dispatch! :update $state
@@ -81,7 +106,7 @@
                             (fn [result]
                               (dispatch! :update $state assoc :registry (packages/catalog)
                                          :message (if (:restart? result) "Installed. Restart the JVM to load the new version." "Installed."))
-                              (when (and (:open? state) (= :applet (:kind p)) (not (:restart? result)))
+                              (when (and (:open? state) (#{:applet :toolset} (:kind p)) (not (:restart? result)))
                                 (open-package! dispatch! p))))
       :remove (applet/task! dispatch! $state #(packages/remove! id)
                            (fn [result]
@@ -160,21 +185,19 @@
 
 (defui package-row [{:keys [package width selected? busy? on-select on-action]}]
   (let [w (max 0 width) wide? (> w 600)
-        state (packages/status package)
-        action (case state :installed (if (= :library (:kind package)) "Included" "Open")
-                           :restart "Restart JVM" "Install")]
+        {:keys [label disabled?]} (primary-action package)]
     (ui/wrap-on :mouse-down (fn [handler pos] (concat (when on-select (on-select)) (handler pos)))
       (ui/fixed-bounds [w 52]
         [(when selected? (eui/surface context w 52 :color/selection 4))
          (ui/translate 10 15 (eui/icon {:name (or (:icon package) (case (:kind package) :theme "skin" :workspace "layout" "appstore")) :size 22}))
-         (ui/translate 52 15 (eui/text {:text (:name package) :width (if wide? 160 (max 1 (- w 150)))}))
+         (ui/translate 42 15 (eui/text {:text (:name package) :width (if wide? 160 (max 1 (- w 190)))}))
          (when wide?
            (ui/translate 224 15 (eui/text {:text (:description package) :width (max 1 (- w 430)) :size 13 :color :color/secondary})))
          (when (> w 780)
            (ui/translate (- w 198) 16 (eui/text {:text (name (source-kind package)) :size 12 :color :color/secondary})))
-         (ui/translate (max 0 (- w 112)) 10
-           (eui/button {:text action :width 102 :height 32 :size :small
-                        :disabled? (or busy? (= state :restart) (= :library (:kind package)))
+         (ui/translate (max 0 (- w 142)) 10
+           (eui/button {:text label :width 138 :height 32 :size :small
+                        :disabled? (or busy? disabled?)
                         :on-click on-action}))
          (ui/translate 0 51 (eui/rule context w))]))))
 
@@ -208,10 +231,20 @@
                   (eui/row nil [(eui/button {:text "Edit EDN" :variant :link :on-click (action :edit)})
                                 (when (:preview-original state)
                                   (eui/button {:text "Revert preview" :variant :link :on-click (action :revert)}))]))
-                 (eui/button {:text (cond (:restart? p) "Restart JVM" installed? (case (:kind p) :workspace "Use workspace" :composition "Use composition" :keymap "Use keymap" "Open") :else "Install")
-                              :width 142 :height 40 :variant :primary
-                              :disabled? (or busy? (:restart? p) (= :library (:kind p)) (and installed? (= :toolset (:kind p))))
-                              :on-click (action (if installed? :open :install))}))
+                 (let [primary (primary-action p)]
+                   (eui/button {:text (:label primary) :height 40 :variant :primary
+                                :disabled? (or busy? (:disabled? primary))
+                                :on-click (action (:action primary))})))
+               (when (:restart? p)
+                 (eui/text {:text "Close Easel and run it again to load this version." :width w :color :color/secondary}))
+               (when (= :toolset (:kind p))
+                 (ui/vertical-layout
+                  (ui/spacer 0 16)
+                  (eui/text {:text "Members" :weight :semi-bold})
+                  (apply ui/vertical-layout
+                    (for [id (:requires p) :let [member (get (:registry state) id)]]
+                      (eui/button {:text (:name member (str id)) :variant :link :width w
+                                   :on-click #(vector [:update $state assoc :selected id :details? true])})))))
                (when (and installed? (#{:composition :keymap} (:kind p)))
                  (ui/padding 0 12 (eui/button {:text "Edit EDN" :variant :link :on-click (action :edit)})))
                (when (and (= :applet (:kind p)) (not installed?))
@@ -228,9 +261,7 @@
                (ui/spacer 0 16)
                (when-let [source (:source p)]
                  (eui/button {:text "Source ↗" :variant :link
-                              :on-click #(vector [:com.phronemophobic.easel/add-applet
-                                                   {:make-applet (fn [handler]
-                                                                   ((requiring-resolve 'com.phronemophobic.easel.browser/browslet) handler source))}])}))
+                              :on-click (action :source)}))
                (ui/spacer 0 12)
                (eui/wrap-row w
                  [(eui/button {:text (if (get-in state [:pins (:id p)]) "Unpin version" "Pin version")
@@ -262,13 +293,13 @@
 
 (defui package-view [{:keys [state size]}]
   (let [[width height] size
-        detail-width (if (> width 960) (min 400 (* width 0.3)) 0)
+        selected (or (get (:updates state) (:selected state)) (get (:registry state) (:selected state)))
+        detail-width (if (and selected (:details? state) (> width 960)) (min 400 (* width 0.3)) 0)
         main-width (max 0 (- width detail-width (if (pos? detail-width) 8 0)))
         w (max 1 (- main-width 48))
-        selected (or (get (:updates state) (:selected state)) (get (:registry state) (:selected state)))
         items (matches state)
         select (fn [id] #(vector [:update $state assoc :selected id :details? true]))
-        action (fn [p] #(vector [::action $state (if (packages/installed? p) :open :install) (:id p)]))
+        action (fn [p] #(vector [::action $state (:action (primary-action p)) (:id p)]))
         body (ui/vertical-layout
                (eui/row w [(eui/text {:text "Tools" :size 28 :weight :semi-bold})
                             (ui/spacer (max 0 (- w 200)) 0)
@@ -282,17 +313,19 @@
                (ui/spacer 0 4)
                (eui/text {:text "Small tools. Shared data." :size 16 :color :color/secondary})
                (ui/spacer 0 20)
+               (when-not (= :sources (:page state))
+                (ui/vertical-layout
                (eui/field {:text (:query state "") :$text [$state '(keypath :query)]
                            :placeholder "Search tools and libraries" :width w})
                (ui/spacer 0 12)
-               (eui/wrap-row w
+               (when-not (#{:toolsets :updates} (:page state)) (eui/wrap-row w
                  (for [[id name] [[:all "All"] [:clojars "Clojars"] [:git "Git"] [:local "Local"]
                                   [:applet "Applets"] [:library "Libraries"] [:theme "Themes"] [:workspace "Workspaces"] [:composition "Compositions"] [:keymap "Keymaps"]]]
                    (eui/button {:text name :variant :text :size :small
                                 :selected? (or (= id (:source-filter state)) (= id (:kind state)))
-                                :on-click #(vector [:update $state assoc (if (#{:all :clojars :git :local} id) :source-filter :kind) id])})))
+                                :on-click #(vector [:update $state assoc (if (#{:all :clojars :git :local} id) :source-filter :kind) id])}))))))
                (ui/spacer 0 24)
-               (when (= :discover (:page state))
+               (when (and (= :discover (:page state)) (= :applet (:kind state)))
                  (ui/vertical-layout
                   (eui/text {:text "Toolsets" :size 18 :weight :semi-bold})
                   (ui/spacer 0 4)
@@ -301,9 +334,10 @@
                   (ui/flex-layout
                    (for [id [:easel/essentials :easel/data-graphics :easel/models]
                          :let [p (get (:registry state) id)]]
-                     (toolset-card {:package p :width (/ (- w 16) 3) :busy? (:busy? state)
+                     (toolset-card {:package p :width (if (< w 720) w (/ (- w 16) 3)) :busy? (:busy? state)
                                     :selected? (= id (:selected state)) :on-select (select id)
-                                    :on-install #(vector [::action $state :install id])})) {:gap 8})
+                                    :on-install #(vector [::action $state :install id])}))
+                   {:gap 8 :direction (if (< w 720) :column :row)})
                   (ui/spacer 0 24) (eui/rule context w) (ui/spacer 0 20)))
                (when (= :sources (:page state))
                  (ui/vertical-layout
@@ -328,16 +362,18 @@
                                :disabled? (or (:busy? state) (empty? (:members state)) (str/blank? (:toolset-name state)))
                                :on-click #(vector [::save-toolset $state])})
                   (ui/spacer 0 20)))
-               (eui/row w [(eui/text {:text (case (:page state) :installed "Installed" :updates "Updates" :toolsets "Toolsets" "Available tools")
+               (when-not (= :sources (:page state))
+                (eui/wrap-row w [(eui/text {:text (case (:page state) :installed "Installed" :updates "Updates" :toolsets "Toolsets" "Available tools")
                                       :size 18 :weight :semi-bold})
                             (eui/button {:text "Refresh" :variant :link :size :small :on-click #(vector [::refresh $state])})
                             (eui/button {:text "Check updates" :variant :link :size :small :disabled? (:busy? state)
-                                         :on-click #(vector [::updates $state])})])
+                                         :on-click #(vector [::updates $state])})]))
                (ui/spacer 0 12)
                (when (:busy? state) (eui/text {:text "Working…" :color :color/secondary}))
                (when-let [message (:message state)] (eui/text {:text message :width w :size 12 :color :color/secondary}))
                (when-let [error (:error state)] (eui/text {:text error :width w :color :color/error}))
-               (when (empty? items) (ui/padding 0 16 (eui/text {:text "No matching packages." :color :color/secondary})))
+               (when (and (empty? items) (not= :sources (:page state)))
+                 (ui/padding 0 16 (eui/text {:text "No matching packages." :color :color/secondary})))
                (apply ui/vertical-layout
                       (for [p items]
                         (package-row {:package p :width w :busy? (:busy? state)
@@ -359,6 +395,6 @@
 (defn package-applet [handler]
   (assoc (applet/tool-applet "Tools" #'package-view
                              {:registry (packages/catalog) :page :discover :kind :applet :source-filter :all
-                              :query "" :selected :easel/flowstorm :open? true :members #{}
+                              :query "" :selected nil :open? true :members #{}
                               :pins (:pins (settings/read-settings))})
          :tool-manager? true :icon "appstore"))

@@ -10,6 +10,8 @@
             [com.phronemophobic.easel.tap-watcher :as tap]
             [com.phronemophobic.easel.applet :as applet]
             [com.phronemophobic.easel.model :as model]
+            [com.phronemophobic.easel.shell :as shell]
+            [com.phronemophobic.easel.commands :as commands]
             [com.phronemophobic.easel.events :as events]
             [com.phronemophobic.easel :as easel]
             [com.phronemophobic.viscous :as viscous]
@@ -143,3 +145,35 @@
         stage-button (fn [view] (some #(when (and (= "Stage" (:text %)) (:on-click %)) %) (view-nodes view)))]
     (is (nil? (seq (ui/mouse-down (stage-button (make-view "changed")) [5 5]))))
     (is (seq (ui/mouse-down (stage-button (make-view "loaded")) [5 5])))))
+
+(deftest command-search-uses-description-and-category
+  (let [items [{:id :test/a :name "Editor" :description "Structural Clojure editing" :category :applet}
+               {:id :test/b :name "Clojure" :category :guide}
+               {:id :test/c :name "Hidden" :palette? false}]]
+    (is (= [:test/a] (mapv :id (commands/matching items "clojure structural" :applet))))
+    (is (= [:test/b :test/a] (mapv :id (commands/matching items "" nil))))))
+
+(deftest command-palette-can-reach-every-result-and-skips-disabled-actions
+  (let [items (mapv (fn [i] {:id (keyword "test" (str i)) :name (format "Command %02d" i)
+                             :disabled? (= i 2) :intents [[:test/run i]]}) (range 20))
+        state (atom {:commands items :query "" :width 640 :height 400
+                     :membrane.component/context {:focus ::shell/command-query}})
+        base (component/default-handler state) calls (atom [])
+        app (component/make-app #'shell/command-palette state
+                                 (fn [intents]
+                                   (doseq [[effect & args :as intent] intents]
+                                     (if (= effect :test/run) (swap! calls conj (first args)) (base [intent])))))]
+    (dotimes [_ 18] (ui/key-press (app) :down))
+    (is (= 18 (get-in @state [:selection :index])))
+    (ui/key-press (app) :enter)
+    (is (= [19] @calls))
+    (ui/key-press (app) :down)
+    (is (= 0 (get-in @state [:selection :index])))
+    (swap! state assoc :query "Command 02")
+    (ui/key-press (app) :enter)
+    (is (= [19] @calls))
+    (swap! state assoc :query "no such command")
+    (ui/key-press (app) :down)
+    (is (every? number? (ui/bounds (app))))
+    (ui/key-press (app) :enter)
+    (is (= [19] @calls))))
