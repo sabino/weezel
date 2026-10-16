@@ -1357,7 +1357,7 @@
 (declare remove-all-widgets!)
 
 (defn run
-  "Open the native Easel workspace. Options include :size and :preset."
+  "Open the native Easel workspace asynchronously. Options include :size and :preset."
   {:easel/see-also [com.phronemophobic.easel/make-easel
                     com.phronemophobic.easel/add-component-as-applet :start]}
   ([] (run {}))
@@ -1386,6 +1386,10 @@
                                (handler :update :easel dissoc :packages-restored?)
                                (remove-all-widgets!)))))))]
      {::skia/repaint repaint! ::closed closed})))
+
+(defn -main [& _]
+  (async/<!! (::closed (run)))
+  (shutdown-agents))
 
 (defn ^:private headless
   ([] (headless {}))

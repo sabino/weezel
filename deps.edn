@@ -54,6 +54,9 @@
  :aliases
  {
 
+  :run
+  {:main-opts ["-m" "com.phronemophobic.easel"]}
+
   :flowstorm
   {:extra-deps {com.github.flow-storm/flow-storm-dbg {:mvn/version "4.5.9"}}}
 

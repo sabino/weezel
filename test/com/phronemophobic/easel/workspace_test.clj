@@ -23,6 +23,40 @@
   (loop [n 500]
     (or (f) (when (pos? n) (Thread/sleep 10) (recur (dec n))))))
 
+(deftest command-line-entrypoint-waits-for-window-close
+  (let [directory (fixtures/temporary-directory)
+        startup (io/file directory "startup.clj")
+        output (io/file directory "output.txt")]
+    (try
+      (spit startup
+            "(require '[com.phronemophobic.easel :as easel]
+                      '[clojure.core.async :as async])
+             (alter-var-root #'easel/run
+               (constantly
+                 (fn []
+                   {::easel/closed
+                    (async/thread
+                      (Thread/sleep 500)
+                      (println \"window-closed\")
+                      (flush))})))")
+      (let [process (-> (ProcessBuilder.
+                         ^java.util.List
+                         [(str (io/file (System/getProperty "java.home") "bin" "java"))
+                          "-cp" (System/getProperty "java.class.path")
+                          "clojure.main" "-i" (.getPath startup)
+                          "-m" "com.phronemophobic.easel"])
+                        (.redirectErrorStream true)
+                        (.redirectOutput output)
+                        (.start))]
+        (try
+          (is (.waitFor process 30 java.util.concurrent.TimeUnit/SECONDS))
+          (when (.isAlive process) (.destroyForcibly process) (.waitFor process))
+          (is (zero? (.exitValue process)) (slurp output))
+          (is (re-find #"(?m)^window-closed$" (slurp output)) (slurp output))
+          (finally
+            (when (.isAlive process) (.destroyForcibly process) (.waitFor process)))))
+      (finally (fixtures/delete-directory! directory)))))
+
 (deftest successive-camera-drags-preserve-orientation
   (let [state (atom {:state {} :scene {:radius 96 :count 24} :width 400 :height 240 :mode :3d})
         app (component/make-app #'sketchbook/interactive-plot state)]
