@@ -214,4 +214,4 @@
 (defn termlet
   ([handler] (termlet handler {}))
   ([handler options]
-   (assoc (->Termlet handler) :label "term" :command (:command options) :env (:env options))))
+   (assoc (->Termlet handler) :label "term" :keymap/input? true :command (:command options) :env (:env options))))

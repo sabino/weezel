@@ -283,17 +283,19 @@
     (handler :com.phronemophobic.easel/close-tools)))
 
 (defn- update-editor-keys [easel descriptor]
-  (if (= (select-keys (:scopes (keymap/current easel)) [:editor :clojure])
-         (select-keys (:scopes descriptor) [:editor :clojure]))
-    easel
-    (update easel :applets
-          (fn [applets]
-            (reduce-kv (fn [result id applet]
-                         (assoc result id
-                                (if (get-in applet [:state :editor])
-                                  (update-in applet [:state :editor]
-                                             (requiring-resolve 'com.phronemophobic.easel.clobber/apply-keymap) descriptor)
-                                  applet))) (empty applets) applets)))))
+  (let [changed? (not= (select-keys (:scopes (keymap/current easel)) [:editor :clojure])
+                       (select-keys (:scopes descriptor) [:editor :clojure]))]
+    (-> easel
+        (dissoc :key-prefix :key-prefix-focus :key-forwarded? :key-consumed)
+        (update :applets
+                (fn [applets]
+                  (reduce-kv (fn [result id applet]
+                               (assoc result id
+                                      (if (get-in applet [:state :editor])
+                                        (cond-> (assoc applet :extra {})
+                                          changed? (update-in [:state :editor]
+                                                             (requiring-resolve 'com.phronemophobic.easel.clobber/apply-keymap) descriptor))
+                                        applet))) (empty applets) applets))))))
 
 (defn- resolve-keymap! [id registry]
   (let [resolved (keymap/resolve-keymap

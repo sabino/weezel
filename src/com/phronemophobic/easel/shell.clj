@@ -101,7 +101,8 @@
                      :on-click #(vector [:com.phronemophobic.easel/open-workspace id])})))))
 
 (defui command-button [{:keys [easel width height command text icon show-shortcut?]}]
-  (eui/button {:text (str text (when show-shortcut? (str "     " (keymap/shortcut (keymap/current easel) command))))
+  (eui/button {:text (str text (when-let [keys (and show-shortcut? (keymap/shortcut (keymap/current easel) (keymap/scopes easel context) command))]
+                               (str "     " keys)))
                :icon icon :width width :height height :variant :text
                :on-click #(vector [:com.phronemophobic.easel/invoke-command command nil])}))
 
@@ -144,8 +145,12 @@
      (when (> width 800)
        (ui/translate (- width 340) 4
          (eui/text {:text (or (when (:theme-error easel) "Theme error · previous theme retained")
-                             (:message easel) (str (keymap/shortcut (keymap/current easel) :easel/commands) " Commands    "
-                                                  (keymap/shortcut (keymap/current easel) :easel/help) " Help"))
+                             (:message easel)
+                             (str/join "    "
+                               (keep (fn [[id label]]
+                                       (when-let [keys (keymap/shortcut (keymap/current easel) (keymap/scopes easel context) id)]
+                                         (str keys " " label)))
+                                     [[:easel/commands "Commands"] [:easel/help "Help"]])))
                     :width 330 :size 11 :color :color/secondary})))]))
 
 (defui command-row [{:keys [command width selected? on-click hover?]}]

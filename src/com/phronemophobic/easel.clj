@@ -39,6 +39,10 @@
 (defonce window-ready? (atom false))
 (defn repaint! [] (when @window-ready? (#'skia/glfw-post-empty-event)))
 
+(defn native-scroll [window _handle dx dy]
+  (ui/scroll @(:ui window) [(* -2 dx) (* -2 dy)] @(:mouse-position window))
+  (skia/repaint! window))
+
 (defonce app-state
   (atom nil))
 
@@ -1384,12 +1388,7 @@
      :easel-path '(keypath :easel)}))
 
 (defn key-scopes [easel context]
-  (cond-> [:global]
-    (or (nil? (:focus context))
-        (and (or (uuid? (:focus context)) (integer? (:focus context)))
-             (not (contains? (:applets easel) (:focus context))))) (conj :workspace)
-    (get-in easel [:applets (:focus context) :package/id])
-    (conj (get-in easel [:applets (:focus context) :package/id]))))
+  (keymap/scopes easel context))
 
 (defeffect ::open-package [id pane-id]
   (dispatch! ::finish-help)
@@ -1428,7 +1427,7 @@
     (for [[id descriptor] (sort-by (comp :name val) (command/registry (composition/current easel) environment))
           :when (not (:hidden? descriptor))]
       (assoc descriptor :disabled? (not (command/enabled? descriptor environment))
-                        :shortcut (keymap/shortcut (keymap/current easel) id)
+                        :shortcut (keymap/shortcut (keymap/current easel) (key-scopes easel context) id)
                         :intents [[::invoke-command id (:pane-id environment)]]))))
 
 (defeffect ::invoke-command [id pane-id]
@@ -1454,7 +1453,8 @@
 
 (defui easel-view [{:keys [easel]}]
   (let [appearance (or (:appearance easel) (theme/current))
-        shared-context (assoc context ::theme/value appearance :composition/frames (:composition/frames easel))
+        shared-context (assoc context ::theme/value appearance ::keymap/value (keymap/current easel)
+                                      :composition/frames (:composition/frames easel))
         dock-id (get-in easel [:dock :applets (get-in easel [:dock :selected])])
         dock-applet (get-in easel [:applets dock-id])
         manager (get-in easel [:applets (:manager-id easel)])
@@ -1476,7 +1476,7 @@
               registry (command/registry (composition/current easel) environment)
               match (when code (keymap/match-event (keymap/current easel) (key-scopes easel context) nil code 0
                                                    #(command/enabled? (get registry %) environment)))]
-          (cond (and (string? key) (:key-consumed live)) []
+          (cond (and (:key-consumed live) (or (string? key) (= code (:key-consumed live)))) []
                 (:command match) [[::invoke-command (:command match) nil]]
                 :else (next-handler key))))
       (ui/wrap-on :key-event
@@ -1491,11 +1491,23 @@
                   registry (command/registry (composition/current easel) environment)
                   scopes (key-scopes easel context)
                   match (keymap/match-event (keymap/current easel) scopes (:key-prefix easel) key mods
-                                           #(command/enabled? (get registry %) environment))]
-              (cond (:command match) [[:update $easel #(-> % (dissoc :key-prefix) (assoc :key-consumed key))]
-                                      [::invoke-command (:command match) nil]]
-                    (:pending match) [[:update $easel assoc :key-prefix (:pending match) :key-consumed key]]
-                    (:key-prefix easel) [[:update $easel #(-> % (dissoc :key-prefix) (assoc :key-consumed key))]]
+                                           #(command/enabled? (get registry %) environment))
+                  editor-prefix? (and (:pending match) (keymap/editor-prefix? easel (:focus context) (:pending match)))
+                  forwarded? (and (:key-forwarded? easel) (= (:key-prefix-focus easel) (:focus context)))
+                  clear-editor (when (and (:key-forwarded? easel) (or (not forwarded?) (not editor-prefix?))
+                                          (get-in easel [:applets (:key-prefix-focus easel) :state :editor]))
+                                 [:set [$easel '(keypath :applets) (list 'keypath (:key-prefix-focus easel)) '(keypath :extra)] {}])]
+              (cond (:command match) (cond-> [[:update $easel #(-> % (dissoc :key-prefix :key-prefix-focus :key-forwarded?) (assoc :key-consumed key))]]
+                                       clear-editor (conj clear-editor)
+                                       true (conj [::invoke-command (:command match) nil]))
+                    (:pending match) (into (cond-> [[:update $easel assoc :key-prefix (:pending match)
+                                                     :key-prefix-focus (:focus context) :key-forwarded? editor-prefix? :key-consumed key]]
+                                               clear-editor (conj clear-editor))
+                                           (when editor-prefix? (next-handler key scancode action mods)))
+                    (:key-prefix easel) (into (cond-> [[:update $easel #(cond-> (dissoc % :key-prefix :key-prefix-focus :key-forwarded? :key-consumed)
+                                                                                        (not forwarded?) (assoc :key-consumed key))]]
+                                               clear-editor (conj clear-editor))
+                                             (when forwarded? (next-handler key scancode action mods)))
                     :else (into [[:update $easel dissoc :key-consumed]] (next-handler key scancode action mods))))
             :else (next-handler key scancode action mods))) view))))
 
@@ -1527,7 +1539,8 @@
          options {:include-container-info true :window-title "Easel"
        :window-start-width (first size) :window-start-height (second size)
        ::skia/on-main (fn [] (reset! window-ready? true) (in-runtime on-main-callback))
-       :handlers {:reshape
+       :handlers {:scroll native-scroll
+                  :reshape
                   (fn [window handle width height]
                     (let [[sx sy] (skia/get-window-content-scale-size handle)]
                       (swap! app-state update :easel resize-window

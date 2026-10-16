@@ -8,6 +8,7 @@
             [com.phronemophobic.easel.events :as events]
             [com.phronemophobic.easel.guides :as guides]
             [com.phronemophobic.easel.inspector :as inspector]
+            [com.phronemophobic.easel.keymap :as keymap]
             [com.phronemophobic.easel.model :as model]
             [com.phronemophobic.easel.ui :as eui]
             [com.phronemophobic.easel.theme :as theme]
@@ -440,7 +441,7 @@
       :guide (if-let [{:keys [title paragraphs examples links]} (guides/guide (:id target))]
                (ui/vertical-layout
                 (prose title width)
-                (apply ui/vertical-layout (map #(prose % width) paragraphs))
+                (apply ui/vertical-layout (map #(prose (guides/paragraph % (::keymap/value context)) width) paragraphs))
                 (examples-view {:state state :target target :examples examples :width width})
                 (prose "Explore" width)
                 (apply ui/vertical-layout (map #(link-view {:state state :target %}) links)))

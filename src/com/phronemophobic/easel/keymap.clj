@@ -1,6 +1,7 @@
 (ns com.phronemophobic.easel.keymap
   (:require [clojure.java.io :as io]
             [clojure.string :as str]
+            [clojure.repl :as repl]
             [com.phronemophobic.clobber.util.ui.key-binding :as binding]
             [com.phronemophobic.easel.theme :as theme]
             [membrane.skia :as skia]
@@ -79,14 +80,59 @@
       {:command (:command complete)}
       (when (seq matches) {:pending sequence}))))
 
-(defn shortcuts [descriptor command]
-  (vec (for [scope [:global :workspace]
-             [keys target] (sort-by key (get-in descriptor [:scopes scope])) :when (= command target)] keys)))
+(defn scopes [easel context]
+  (let [focus (:focus context) applet (when-not (or (:help easel) (:manager-id easel)) (get-in easel [:applets focus]))]
+    (cond-> [:global]
+      (or (nil? focus)
+          (and applet (not (:keymap/input? applet)))
+          (and (or (uuid? focus) (integer? focus)) (nil? applet))) (conj :workspace)
+      (:package/id applet) (conj (:package/id applet)))))
 
-(defn shortcut [descriptor command] (first (shortcuts descriptor command)))
+(defn shortcuts
+  ([descriptor command] (shortcuts descriptor [:global :workspace] command))
+  ([descriptor scopes command]
+   (vec (for [scope scopes
+              [keys target] (sort-by key (get-in descriptor [:scopes scope])) :when (= command target)] keys))))
+
+(defn shortcut
+  ([descriptor command] (first (shortcuts descriptor command)))
+  ([descriptor scopes command] (first (shortcuts descriptor scopes command))))
 
 (defn editor-bindings [base descriptor clojure?]
   (reduce-kv (fn [bindings keys intent]
                (if (nil? intent) (dissoc bindings keys)
                    (assoc bindings keys (if (symbol? intent) (requiring-resolve intent) intent))))
              base (merge (get-in descriptor [:scopes :editor]) (when clojure? (get-in descriptor [:scopes :clojure])))))
+
+(defn binding-target [value]
+  (cond
+    (var? value) (symbol (str (ns-name (:ns (meta value)))) (str (:name (meta value))))
+    (fn? value) (symbol (repl/demunge (.getName (class value))))
+    :else value))
+
+(defn editor-keys [easel]
+  (let [editor (or (get-in easel [:applets (get-in easel [:help :previous-focus]) :state :editor])
+                   (some #(get-in % [:state :editor]) (vals (:applets easel))))
+        clojure? (if editor (:easel/clojure? editor) true)
+        base (or (:easel/base-key-bindings editor)
+                 @(requiring-resolve
+                   (if clojure? 'com.phronemophobic.clobber.modes.clojure.ui/clojure-key-bindings
+                       'com.phronemophobic.clobber.modes.text.ui/key-bindings)))]
+    (editor-bindings base (current easel) clojure?)))
+
+(defn editor-shortcuts [bindings action]
+  (vec (for [[keys target] (sort-by key bindings)
+             :when (= (binding-target target) (binding-target action))] keys)))
+
+(defn binding-label [target]
+  (let [target (binding-target target)]
+    (-> (name target) (str/replace #"^(editor-|init-)" "")
+        (str/replace "-" " ") str/capitalize)))
+
+(defn editor-prefix? [easel focus prefix]
+  (boolean
+    (some (fn [[keys _]]
+            (let [chords (parse-keys keys)]
+              (and (> (count chords) (count prefix))
+                   (= prefix (vec (take (count prefix) chords))))))
+          (get-in easel [:applets focus :state :editor :key-bindings]))))

@@ -1,6 +1,8 @@
 (ns com.phronemophobic.easel.help
   (:require [com.phronemophobic.easel.keymap :as keymap]
+            [com.phronemophobic.easel.composition :as composition]
             [com.phronemophobic.easel.commands :as commands]
+            [clojure.string :as str]
             [com.phronemophobic.easel.ui :as eui]
             [membrane.basic-components :as basic]
             [membrane.component :refer [defui]]
@@ -14,7 +16,9 @@
   ([] (shortcut-groups {}))
   ([easel]
    (let [descriptor (keymap/current easel)
-         names (into {} (map (fn [[id value]] [id (:name value)])) @commands/builtin)
+         names (into {} (map (fn [[id value]] [id (:name value)]))
+                     (commands/registry (composition/current easel) {:easel easel}))
+         bindings (keymap/editor-keys easel)
          editor-actions {"split-pane" "Split the editor pane side by side."
                          "delete-pane" "Close this applet." "show-select-buffer" "Choose an open buffer."
                          "focus-next" "Focus the next pane." "close-other-panes" "Hide other panes."
@@ -26,18 +30,21 @@
              {:title title :rows (vec (for [[keys id] (sort-by key (get-in descriptor [:scopes scope])) :when id]
                                        [keys (get names id (str id))]))})
            [{:title "Editing text with Clobber"
-             :rows [["C-x C-f / C-x C-s" "Open / save a file."] ["C-s / C-r" "Search forward / backward."]
-                    ["C-a / C-e" "Start / end of line."] ["C-k" "Cut to the end of the line. M-x opens Easel commands from the editor."]
-                    ["C-SPC" "Set a mark, then move to select text."] ["C-w / M-w / C-y" "Cut / copy / yank from the kill ring."]
-                    ["C-g / C-_" "Cancel an editor command / undo."]]}
+            :rows (vec (for [[keys intent] (sort-by key bindings)
+                             :when (not= "com.phronemophobic.easel.clobber" (namespace (keymap/binding-target intent)))]
+                         [keys (keymap/binding-label intent)]))}
             {:title "Pane and evaluation bindings from this keymap"
-             :rows (vec (for [scope [:editor :clojure] [keys intent] (sort-by key (get-in descriptor [:scopes scope])) :when intent]
-                          [keys (get editor-actions (name intent) (str intent))]))}])))))
+             :rows (vec (for [[keys intent] (sort-by key bindings)
+                              :when (= "com.phronemophobic.easel.clobber" (namespace (keymap/binding-target intent)))]
+                          [keys (get editor-actions (name (keymap/binding-target intent)) (keymap/binding-label intent))]))}])))))
+
+(defn action-keys [easel action]
+  (str/join " / " (keymap/shortcuts (keymap/current easel) [:editor :clojure] action)))
 
 (defui paragraph [{:keys [text width]}]
   (ui/padding 0 5 (eui/text {:text text :width width :color :color/secondary})))
 
-(defui introduction-page [{:keys [width page]}]
+(defui introduction-page [{:keys [width page easel]}]
   (case page
     :start
     (ui/vertical-layout
@@ -49,7 +56,10 @@
      (paragraph {:width width :text "The dock holds the REPL, values, logs, and terminal. Its tools start only when you choose them. Find saved workspaces in command search or Tools. Examples are optional presets."})
      (ui/spacer 0 18)
      (eui/text {:text "Try a short feedback loop" :weight :semi-bold :width width})
-     (paragraph {:width width :text "Open a Clojure buffer, type (+ 1 2), and place the cursor after the closing parenthesis. Press Control+x, then Control+e. The result is 3. Change the form and evaluate it again."})
+     (paragraph {:width width :text (str "Open a Clojure buffer, type (+ 1 2), and place the cursor after the closing parenthesis. "
+                                        (let [keys (action-keys easel :com.phronemophobic.easel.clobber/eval-last)]
+                                          (if (seq keys) (str "Press " keys " to evaluate it. The result is 3. Change the form and evaluate it again.")
+                                              "The evaluate-form action is unbound in this keymap; choose a binding in Tools → Keymaps.")))})
      (eui/wrap-row width
        [(eui/button {:text "Open a blank editor" :icon "file-text"
                      :on-click #(vector [:com.phronemophobic.easel/finish-help]
@@ -69,7 +79,9 @@
         (eui/button {:text "Choose a keymap" :on-click #(vector [:com.phronemophobic.easel/finish-help]
                                                                 [:com.phronemophobic.easel/manage-packages :keymap])})])
      (ui/spacer 0 20)
-     (paragraph {:width width :text "Return to this guide with F1 or the pane menu. Keys and concepts explains the notation; Shortcuts shows the selected keymap."}))
+     (paragraph {:width width :text (str "Return to this guide with "
+                                        (or (keymap/shortcut (keymap/current easel) :easel/help) "the pane menu")
+                                        ". Keys and concepts explains the notation; Shortcuts shows the selected keymap.")}))
 
     :emacs
     (ui/vertical-layout
@@ -79,15 +91,28 @@
      (eui/text {:text "C means Control. M means Meta." :weight :semi-bold :width width})
      (paragraph {:width width :text "C-x means hold Control and press x. On a Mac, this is the Control key, not Command (⌘). M-x means hold Option (Alt) and press x. C-M-x means hold Control and Option together, then press x."})
      (eui/text {:text "A space separates two key presses" :weight :semi-bold :width width})
-     (paragraph {:width width :text "For C-x C-e, press Control+x, release, then press Control+e. You can also keep Control held and press x followed by e. C-x is a prefix: it waits for the next key. C-g cancels if you get lost."})
+     (paragraph {:width width :text (str "Spaces separate successive keystrokes. The current evaluate-form binding is "
+                                        (let [keys (action-keys easel :com.phronemophobic.easel.clobber/eval-last)] (if (seq keys) keys "unbound"))
+                                        ". A multi-key binding waits for its next keystroke; release and press each chord in order.")})
      (ui/spacer 0 14)
      (eui/text {:text "Buffer, pane, and applet" :weight :semi-bold :width width})
      (paragraph {:width width :text "A buffer is text held in memory. It is saved to disk only when you save it. A pane is one area of the workspace; Emacs calls this a window. An applet is a running tool that occupies a pane. Hiding a pane keeps its applet; closing the applet stops it."})
      (eui/text {:text "Point, mark, and kill ring" :weight :semi-bold :width width})
-     (paragraph {:width width :text "Point is the cursor. Mark is the other end of a selection: C-SPC sets it, then moving the cursor selects a region. Kill means cut, and yank means paste. The kill ring holds text cut or copied by the editor; C-y pastes from it."})
+     (paragraph {:width width :text (let [bindings (keymap/editor-keys easel)
+                                         hint (fn [action] (let [keys (str/join " / " (keymap/editor-shortcuts bindings action))]
+                                                             (if (seq keys) keys "unbound")))]
+                                     (str "Point is the cursor. Mark is the other end of a selection ("
+                                          (hint 'com.phronemophobic.clobber.modes.text/editor-set-mark)
+                                          "); moving the cursor then selects a region. Kill means cut, and yank means paste ("
+                                          (hint 'com.phronemophobic.clobber.modes.text/editor-yank)
+                                          "). The kill ring holds text cut or copied by the editor."))})
      (ui/spacer 0 14)
      (eui/text {:text "Commands and the live REPL" :weight :semi-bold :width width})
-     (paragraph {:width width :text "With the default keymap, M-x finds tools and workspace actions by name. C-k also opens commands when no text input is focused. Inside Clobber, C-k cuts to the end of the line. Shortcuts shows your selected keymap. Clojure buffers and the REPL evaluate in the running process."})
+     (paragraph {:width width :text (str "The active command-search bindings are "
+                                        (let [keys (str/join " / " (keymap/shortcuts (keymap/current easel) :easel/commands))]
+                                          (if (seq keys) keys "unbound"))
+                                        ". Workspace bindings apply outside text input. Editor bindings keep their editing actions. "
+                                        "Shortcuts lists the effective bindings, including live changes. Clojure buffers and the REPL evaluate in the running process.")})
      (paragraph {:width width :text "Start with ordinary typing, arrow keys, and your mouse. Then learn one command at a time: open, save, evaluate, and cancel are enough to begin."}))))
 
 (defui shortcut-group [{:keys [title rows width]}]
@@ -134,7 +159,7 @@
                   (apply ui/vertical-layout
                     (for [group (shortcut-groups easel)]
                       (shortcut-group (assoc group :width content-width))))
-                  (introduction-page {:page page :width content-width}))]
+                  (introduction-page {:page page :width content-width :easel easel}))]
     (ui/fixed-bounds [width height]
       [(eui/surface context width height)
        (ui/translate padding padding header)

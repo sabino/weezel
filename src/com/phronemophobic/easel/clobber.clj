@@ -34,9 +34,11 @@
         node (when tree
                (case scope
                  :last (clobber-util/previous-named-child-for-byte tree (-> editor :cursor :byte))
-                 :top (let [cursor (org.treesitter.TSTreeCursor. (.getRootNode ^org.treesitter.TSTree tree))]
-                        (when-not (= -1 (.gotoFirstChildForByte cursor (-> editor :cursor :byte)))
-                          (.currentNode cursor)))
+                 :top (let [root (.getRootNode ^org.treesitter.TSTree tree)
+                            byte (-> editor :cursor :byte)
+                            forms (map #(.getNamedChild root %) (range (.getNamedChildCount root)))]
+                        (or (some #(when (<= (.getStartByte %) byte (dec (.getEndByte %))) %) forms)
+                            (last (filter #(<= (.getEndByte %) byte) forms))))
                  :buffer nil))]
     (cond
       (= :buffer scope) {:source (str rope) :line 1 :result-line 0}
@@ -193,8 +195,29 @@
     {:body body :$body nil
      :key-tree (key-binding/key-bindings->key-tree (:key-bindings editor))})))
 
+(defn scroll-editor [editor [_ dy]]
+  (let [line-height (max 1 (* (get-in editor [:base-style :text-style/height] 1.5)
+                            (get-in editor [:base-style :text-style/font-size] 13)))
+        tree (:tree editor)
+        lines (if tree (inc (-> ^org.treesitter.TSTree tree .getRootNode .getEndPoint .getRow))
+                  (count (str/split (str (:rope editor)) #"\n" -1)))
+        limit (* line-height (max 0 (- lines (max 1 (get-in editor [:viewport :num-lines] 1)))))
+        pixels (max 0 (min limit (+ (* line-height (get-in editor [:viewport :start-line] 0))
+                                    (get-in editor [:viewport :scroll-remainder] 0) dy)))
+        row (long (/ pixels line-height))]
+    (-> editor (assoc-in [:viewport :start-line] row)
+        (assoc-in [:viewport :scroll-remainder] (- pixels (* row line-height))))))
+
 (defui code-editor [{:keys [editor focused?]}]
-  (let [body (cui/editor-view {:editor editor :focused? focused?})
+  (let [cursor-row (get-in editor [:cursor :row] 0)
+        start (get-in editor [:viewport :start-line] 0)
+        cursor-visible? (<= start cursor-row (dec (+ start (get-in editor [:viewport :num-lines] 1))))
+        body (if cursor-visible?
+               (cui/editor-view {:editor editor :focused? focused?})
+               (let [para (cui/editor->paragraph editor)]
+                 (dnd/on-drop
+                   (fn [pos obj] [[::cui/drop-val {:pos pos :obj obj :editor editor :$editor $editor :para para}]])
+                   para)))
         body (cond
                (not focused?) body
                (::util.ui/file-picker-state editor)
@@ -234,14 +257,18 @@
                                                                       (inspector/preview v))) (take 5 @value))) "\n…")
                                         (inspector/preview @value))
                                  :role :code :size 12 :width (max 1 (- (:width editor) 72))}))))]
-    (ui/wrap-on :mouse-down
+    (ui/wrap-on :scroll
+      (fn [handler delta pos]
+        (or (seq (handler delta pos))
+            (when-not (zero? (second delta)) [[:update $editor scroll-editor delta]])))
+     (ui/wrap-on :mouse-down
       (fn [handler pos] (cons [::cui/request-focus] (handler pos)))
       (ui/fixed-bounds [(:width editor) (:height editor)]
         [(eui/surface context (:width editor) (:height editor))
          (ui/translate 16 18 gutter)
          (ui/translate 52 18 (eui/adapt-colors body (editor-palette context)))
          (when preview
-           (ui/translate 52 (+ 34 (* row-height (count lines))) preview))]))))
+           (ui/translate 52 (+ 34 (* row-height (count lines))) preview))])))))
 
 (defui clobber-ui* [{:keys [this]}]
   (let [focus (:focus context)
@@ -289,12 +316,12 @@
                   (fn []
                     [[:set $focus (:id this)]])
                   (let [ui (if (identical? (:ui this) #'cui/code-editor) #'code-editor (:ui this))
-                        extra (:extra state)]
+                        extra (:extra this)]
                     (ui {:editor editor
                          :$editor $editor
                          :focused? focused?
                          :extra extra
-                         :$extra $extra :context context :$context $context})))
+                         :$extra [$this '(keypath :extra)] :context context :$context $context})))
             body (if buffer-select-state
                    (ui/on
                     :mouse-down
@@ -302,9 +329,10 @@
                       [[:set $focus (:id this)]])
                     (ui/vertical-layout
                      (ui/no-events body)
-                     (let [e (:extra state)]
+                     (let [e (:extra this)]
                        (buffer-selector {:buffer-select-state buffer-select-state
                                          :extra (get e ::buffer-selector)
+                                         :$extra [$this '(keypath :extra) (list 'keypath ::buffer-selector)]
                                          :focused? focused?}))))
                    body)]
         body))))
@@ -432,7 +460,7 @@
                :else "Clobber")
         m (assoc m :label name)]
     (-> (->ClobberApplet handler m)
-      (assoc :label (str name)))))
+      (assoc :label (str name) :keymap/input? true))))
 
 
 (defeffect ::show-select-buffer [{:keys [$ref $focus id]}]

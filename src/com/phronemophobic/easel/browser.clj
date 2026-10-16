@@ -184,8 +184,8 @@
                  (gen3/map->mouse-event
                   {:x (first mpos)
                    :y (second mpos)})
-                 (first delta)
-                 (second delta))
+                 (- (first delta))
+                 (- (second delta)))
       #_(.sendMouseWheelEvent (.getHost ^CefBrowser browser)
                             (cef/map->mouse-event
                              {:x (first mpos)
@@ -401,7 +401,7 @@
 
 (defn browslet [handler url]
   (-> (->Browslet handler url)
-      (assoc :label "Browser")))
+      (assoc :label "Browser" :keymap/input? true)))
 
 (comment
   (cef/download-and-extract-framework

@@ -26,3 +26,13 @@
       (ui/mouse-event view [10 10] 2 true 0)
       (is (= 1 (-> @events peek second second)))
       (is (= gen3/EVENTFLAG_MIDDLE_MOUSE_BUTTON (-> @events peek second first :modifiers))))))
+
+(deftest embedded-browser-keeps-the-native-wheel-direction
+  (let [events (atom []) view (browser/->Browser :browser 0 true 1 200 200 nil nil)]
+    (with-redefs [gen3/map->mouse-event identity
+                  gen3/call (fn [_ method & args]
+                              (if (= method :get_host) :host (swap! events conj [method args])))]
+      (ui/scroll view [12 24] [10 20])
+      (is (= [:send_mouse_wheel_event (list {:x 10 :y 20} -12 -24)] (peek @events)))
+      (ui/scroll view [-12 -24] [10 20])
+      (is (= [:send_mouse_wheel_event (list {:x 10 :y 20} 12 24)] (peek @events))))))

@@ -1,5 +1,7 @@
 (ns com.phronemophobic.easel.guides
-  "Guides are data: prose, runnable forms, and links into the running system.")
+  "Guides are data: prose, runnable forms, and links into the running system."
+  (:require [clojure.string :as str]
+            [com.phronemophobic.easel.keymap :as keymap]))
 
 (def guides
   '[{:id :start
@@ -47,7 +49,13 @@
    {:id :repl
     :title "Keep the feedback loop inside the workspace"
     :paragraphs
-    ["Clobber's Clojure buffers evaluate the preceding form with C-x C-e, the top-level form with C-M-x, and the whole buffer with C-c C-k. Results appear inline; printed output goes to Logs and failures go to Exceptions. The buffer's namespace determines where forms run."
+    [["Clobber's Clojure buffers evaluate the preceding form with "
+      {:shortcut :com.phronemophobic.easel.clobber/eval-last :scopes [:editor :clojure]}
+      ", the top-level form with "
+      {:shortcut :com.phronemophobic.easel.clobber/eval-top :scopes [:editor :clojure]}
+      ", and the whole buffer with "
+      {:shortcut :com.phronemophobic.easel.clobber/eval-buffer :scopes [:editor :clojure]}
+      ". Results appear inline; printed output goes to Logs and failures go to Exceptions. The buffer's namespace determines where forms run."]
      "Use Data Inspector to navigate a returned value, its metadata, or its datafy representation. Tap Watcher follows tap> values. NS Watcher follows vars in a chosen namespace. These are different views of the same running Clojure process."
      "Redefine a view var to change presentation while keeping applet state. A failed applet offers Retry, which makes a fresh instance from its factory. Hiding a pane preserves its resources and state; closing it releases them."
      "Install FlowStorm from Tools, then open its applet to record and inspect execution. It joins the running Clojure process without requiring a separate launch command."]
@@ -90,3 +98,12 @@
 
 (defn guide [id]
   (some #(when (= id (:id %)) %) guides))
+
+(defn paragraph [value descriptor]
+  (if (string? value) value
+      (apply str
+             (map (fn [part]
+                    (if-let [command (and (map? part) (:shortcut part))]
+                      (let [keys (keymap/shortcuts (or descriptor (keymap/current {})) (:scopes part [:global :workspace]) command)]
+                        (if (seq keys) (str/join " / " keys) "unbound"))
+                      part)) value))))
