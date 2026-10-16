@@ -7,7 +7,8 @@
             [com.phronemophobic.easel.theme :as theme]))
 
 (def builtin-resources
-  {:easel/sketchbook "com/phronemophobic/easel/workspaces/sketchbook.edn"
+  {:easel/empty "com/phronemophobic/easel/workspaces/empty.edn"
+   :easel/sketchbook "com/phronemophobic/easel/workspaces/sketchbook.edn"
    :easel/data-lab "com/phronemophobic/easel/workspaces/data_lab.edn"
    :easel/notes "com/phronemophobic/easel/workspaces/notes.edn"})
 
@@ -67,7 +68,10 @@
             (sketchbook/scene-value (atom scene))
             (reset! (:source* session) scene))
         ids (into {} (map (fn [a] [(:slot a) (random-uuid)])) (:applets descriptor))
-        dock (into {} (keep #(when-let [slot (:dock %)] [slot (get ids (:slot %))])) (:applets descriptor))]
+        dock-applets (into {} (keep #(when-let [slot (:dock %)] [slot (get ids (:slot %))])) (:applets descriptor))
+        dock (when (seq dock-applets)
+               {:selected (or (when (:repl dock-applets) :repl) (first (keys dock-applets)))
+                :applets dock-applets})]
     (doseq [a (:applets descriptor)]
       (handler :com.phronemophobic.easel/add-applet
                {:id (get ids (:slot a)) :dock-slot (:dock a) :make-applet (make-factory a session)}))
@@ -78,10 +82,10 @@
                      easel (-> easel
                                (assoc :root-pane root :workspace-id workspace-id :manager-id nil
                                       :eval-ns (or (:ns session) 'user)
-                                      :dock {:selected (or (when (:repl dock) :repl) (first (keys dock))) :applets dock})
+                                      :dock dock)
                                (assoc-in [:workspaces :by-id workspace-id]
                                          {:id workspace-id :name (:name descriptor) :preset preset-id
-                                          :root-pane root :dock {:selected :repl :applets dock}}))]
+                                          :root-pane root :dock dock}))]
                  ((requiring-resolve 'com.phronemophobic.easel/resize-window)
                   easel (:viewport easel [1536 1024]) (:content-scale easel [1 1])))))
     (handler :set '[(keypath :membrane.component/context) (keypath :focus)]
@@ -90,11 +94,13 @@
 (defn initialize! [handler preset-id]
   (let [custom (sort-by :id (filter #(and (= :workspace (:kind %)) (not (:bundled? %)))
                                    (vals ((requiring-resolve 'com.phronemophobic.easel.packages/catalog)))))
-        by-id (into {1 {:id 1 :name "Sketchbook" :preset :easel/sketchbook}
-                     2 {:id 2 :name "Data lab" :preset :easel/data-lab}
-                     3 {:id 3 :name "Notes" :preset :easel/notes}}
+        by-id (into (cond-> {0 {:id 0 :name "Workspace" :preset :easel/empty}}
+                      (not= preset-id :easel/empty)
+                      (merge {1 {:id 1 :name "Sketchbook" :preset :easel/sketchbook}
+                              2 {:id 2 :name "Data lab" :preset :easel/data-lab}
+                              3 {:id 3 :name "Notes" :preset :easel/notes}}))
                     (map-indexed (fn [index p] (let [id (+ 4 index)] [id {:id id :name (:name p) :preset (:id p)}])) custom))
-        id (or (some (fn [[id w]] (when (= preset-id (:preset w)) id)) by-id) 1)]
+        id (or (some (fn [[id w]] (when (= preset-id (:preset w)) id)) by-id) 0)]
     (handler :update :easel assoc :workspaces {:last-id (+ 3 (count custom)) :by-id by-id})
     (open! handler preset-id id)))
 

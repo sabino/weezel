@@ -1,0 +1,5 @@
+{:workspace/version 1
+ :id :easel/empty
+ :name "Workspace"
+ :applets []
+ :layout {:direction :row :panes [{}]}}

@@ -173,6 +173,23 @@
                                          "comment" :color/code-comment "defn" :color/code-definition}]
                     [(get clojure-mode/text-colors capture) (theme/token context token)]))))
 
+(defui editor-key-bindings [{:keys [editor body]}]
+  (ui/on
+   ::key-binding/miss
+   (fn [{:keys [key-binding]}]
+     (when (= 1 (count key-binding))
+       (let [{:keys [key meta? ctrl? super?]} (first key-binding)]
+         (when (and key (not (or meta? ctrl? super? (keyword? key))))
+           [[::cui/update-editor {:op #(text-mode/editor-self-insert-command % (str key)) :$editor $editor}]]))))
+   ::key-binding/press
+   (fn [{:keys [intent]}]
+     (if (keyword? intent)
+       [[intent {:editor editor :$editor $editor}]]
+       [[::cui/update-editor {:op intent :editor editor :$editor $editor}]]))
+   (key-binding/wrap-key-tree
+    {:body body :$body nil
+     :key-tree (key-binding/key-bindings->key-tree (:key-bindings editor))})))
+
 (defui code-editor [{:keys [editor focused?]}]
   (let [body (cui/editor-view {:editor editor :focused? focused?})
         body (cond
@@ -181,9 +198,7 @@
                (ui/vertical-layout body (util.ui/file-picker {:editor editor :update-editor-intent ::cui/update-editor}))
                (::text-mode/search editor)
                (ui/vertical-layout body (util.ui/search-bar {:editor editor :update-editor-intent ::cui/update-editor}))
-               :else (key-binding/wrap-editor-key-bindings
-                       {:key-bindings (:key-bindings editor) :editor editor :update-editor-intent ::cui/update-editor
-                        :body body :$body nil}))
+               :else (editor-key-bindings {:editor editor :body body :$body nil}))
         body (if focused?
                (->> body
                     (ui/on-clipboard-copy (fn [] [[::cui/editor-copy {:editor editor :$editor $editor}]]))
@@ -316,6 +331,10 @@
                    (text-mode/editor-goto-line editor (dec line))
                    (assoc editor :cursor {:byte 0 :char 0 :point 0 :row 0 :column-byte 0}))
                  editor)
+
+        editor (cond-> editor
+                 (and (:ns editor-info) (identical? ui #'cui/code-editor))
+                 (assoc :eval-ns (the-ns (:ns editor-info))))
 
         editor (cond-> editor
                  (:initial-value editor-info)

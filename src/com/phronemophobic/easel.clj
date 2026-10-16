@@ -15,6 +15,7 @@
             [com.phronemophobic.easel.theme :as theme]
             [com.phronemophobic.easel.ui :as eui]
             [com.phronemophobic.easel.shell :as shell]
+            [com.phronemophobic.easel.help :as help]
             [com.phronemophobic.easel.settings :as settings]
             [com.phronemophobic.membrandt :as ant]
             [com.phronemophobic.membrandt.icon.ui :as icon.ui]
@@ -1221,7 +1222,51 @@
        (catch Throwable e
          (events/report! e)
          (dispatch! :update :easel assoc :message (applet/error-message e)))))
+
+(defeffect ::show-help []
+  (dispatch! ::hide-commands)
+  (let [easel (dispatch! :get :easel)]
+    (dispatch! :update :easel
+               #(-> % (dissoc :pane-menu)
+                      (assoc :help
+                             (merge {:previous-focus (dispatch! :get '[(keypath :membrane.component/context) (keypath :focus)])}
+                                    (:help easel) {:page :start :offset [0 0]}))))))
+
+(defeffect ::help-page [page]
+  (when (some #(= page (first %)) help/pages)
+    (dispatch! :update :easel update :help assoc :page page :offset [0 0])))
+
+(defeffect ::finish-help []
+  (when-let [state (:help (dispatch! :get :easel))]
+    (when (:first-run? state)
+      (try (settings/update-settings! assoc :onboarding/version help/version)
+           (catch Throwable e
+             (events/report! e)
+             (dispatch! :update :easel assoc :message (str "Could not save help preference: " (applet/error-message e))))))
+    (dispatch! :update :easel dissoc :help)
+    (dispatch! :set '[(keypath :membrane.component/context) (keypath :focus)] (:previous-focus state))))
+
+(defeffect ::new-editor []
+  (dispatch! ::finish-help)
+  (dispatch! ::close-tools)
+  (let [id (random-uuid)]
+    (dispatch! ::add-applet
+               {:id id
+                :make-applet #(assoc ((requiring-resolve 'com.phronemophobic.easel.clobber/clobber-applet)
+                                      % {:ns 'user :string "" :label "untitled.clj"})
+                                     :package/id :easel/clobber :package/args [{:ns 'user :string "" :label "untitled.clj"}])})
+    (dispatch! ::focus-applet id)))
+
+(defeffect ::open-documentation []
+  (dispatch! ::finish-help)
+  (dispatch! ::close-tools)
+  (dispatch! ::add-applet
+             {:make-applet #(assoc ((requiring-resolve 'com.phronemophobic.easel.documentation/documentation-applet)
+                                    % {:target {:kind :guide :id :start}})
+                                   :package/id :easel/documentation)}))
+
 (defeffect ::focus-applet [id]
+  (dispatch! ::finish-help)
   (dispatch! :update :easel
              #(if (get-in % [:applets id :overlay?])
                 (resize-window (assoc % :manager-id id) (:viewport %) (:content-scale %))
@@ -1233,6 +1278,7 @@
              #(-> % (update :root-pane splitpane/edit-pane-by-id pane-id (fn [pane] (assoc pane :direction direction)))
                   relayout*)))
 (defeffect ::open-workspace [id]
+  (dispatch! ::finish-help)
   (dispatch! :update :easel
              (fn [easel]
                (if-let [current (:workspace-id easel)]
@@ -1246,12 +1292,15 @@
                  #(resize-window (merge % (select-keys workspace [:root-pane :dock :eval-ns])
                                         {:workspace-id id :manager-id nil})
                                  (:viewport %) (:content-scale %)))
-      ((requiring-resolve 'com.phronemophobic.easel.workspace/open!) handler (or (:preset workspace) :easel/sketchbook) id))))
+      ((requiring-resolve 'com.phronemophobic.easel.workspace/open!) handler (or (:preset workspace) :easel/empty) id))))
 
 (defeffect ::toggle-dock []
-  (dispatch! :update :easel
-             #(let [easel (update-in % [:dock :hidden?] not)]
-                (resize-window easel (:viewport easel) (:content-scale easel)))))
+  (dispatch! ::finish-help)
+  (if (:dock (dispatch! :get :easel))
+    (dispatch! :update :easel
+               #(let [easel (update-in % [:dock :hidden?] not)]
+                  (resize-window easel (:viewport easel) (:content-scale easel))))
+    (dispatch! ::select-dock :repl)))
 
 (defeffect ::show-commands [query]
   (dispatch! :update :easel
@@ -1271,6 +1320,7 @@
   (dispatch! :update :easel assoc-in [:commands :pane-id] pane-id))
 
 (defeffect ::select-dock [slot]
+  (dispatch! ::finish-help)
   (let [easel (dispatch! :get :easel)]
     (when-not (get-in easel [:dock :applets slot])
       (let [factory (case slot
@@ -1286,6 +1336,7 @@
                   (resize-window easel (:viewport easel) (:content-scale easel))))))
 
 (defeffect ::open-tools []
+  (dispatch! ::finish-help)
   (let [easel (dispatch! :get :easel)
         existing (some #(when (:tool-manager? %) (:id %)) (vals (:applets easel)))]
     (if existing
@@ -1300,13 +1351,16 @@
   (let [catalog ((requiring-resolve 'com.phronemophobic.easel.packages/catalog))
         installed? (requiring-resolve 'com.phronemophobic.easel.packages/installed?)]
     (concat
-     [{:name "Tools and themes" :icon "appstore" :intents [[::hide-commands] [::open-tools]]}
+     [{:name "Getting started and shortcuts" :icon "question-circle" :intents [[::hide-commands] [::show-help]]}
+      {:name "New blank editor" :icon "file-text" :intents [[::hide-commands] [::new-editor]]}
+      {:name "Open REPL" :icon "code" :intents [[::hide-commands] [::close-tools] [::select-dock :repl]]}
+      {:name "Tools and themes" :icon "appstore" :intents [[::hide-commands] [::open-tools]]}
       {:name "Toggle dock" :icon "layout" :intents [[::hide-commands] [::toggle-dock]]}
       {:name "Balance panes" :icon "border" :intents [[::hide-commands] [::balance-panes {:$easel '(keypath :easel) :pane-id ::root-pane}]]}]
      (for [p (sort-by :name (vals catalog)) :when (= :applet (:kind p))]
        {:name (str (when-not (installed? p) "Install ") (:name p)) :icon (or (:icon p) "plus")
         :intents (if (installed? p)
-                   [[::hide-commands] [::close-tools]
+                   [[::hide-commands] [::finish-help] [::close-tools]
                     [::add-applet {:pane-id (get-in easel [:commands :pane-id])
                                    :make-applet #((requiring-resolve 'com.phronemophobic.easel.packages/make-applet) % (:id p) nil)}]]
                    [[::hide-commands] [::open-tools] [:com.phronemophobic.easel.package-ui/select (:id p)]])})
@@ -1333,36 +1387,56 @@
                 :dock-body (when dock-applet (applet/safe-ui dock-applet $context shared-context))
                 :manager-body (when manager (applet/safe-ui manager $context shared-context))
                 :context shared-context :$context $context})]
-    (ui/wrap-on :key-event
-      (fn [handler key scancode action mods]
-        (if (and (#{:press :repeat} action) (pos? (bit-and mods (if (.startsWith (System/getProperty "os.name") "Mac") ui/SUPER-MASK ui/CONTROL-MASK))))
-          (case key
-            75 [[::show-commands ""]]
-            74 [[::toggle-dock]]
-            (handler key scancode action mods))
-          (handler key scancode action mods))) view)))
+    (ui/wrap-on :key-press
+      (fn [handler key]
+        (if (= key :escape)
+          (cond (:commands easel) [[::hide-commands]]
+                (:help easel) [[::finish-help]]
+                (:pane-menu easel) [[::pane-menu nil]]
+                (::pane-resize (:root-pane easel)) [[::toggle-pane-resize {:$easel '(keypath :easel) :pane-id ::root-pane}]]
+                :else (handler key))
+          (handler key)))
+      (ui/wrap-on :key-event
+        (fn [handler key scancode action mods]
+          (cond
+            (and (= :press action) (= 290 key)) [[::show-help]]
+            (and (= :press action) (= 71 key) (pos? (bit-and mods ui/CONTROL-MASK))
+                 (or (:commands easel) (:help easel) (:pane-menu easel) (::pane-resize (:root-pane easel))))
+            (cond (:commands easel) [[::hide-commands]]
+                  (:help easel) [[::finish-help]]
+                  (:pane-menu easel) [[::pane-menu nil]]
+                  :else [[::toggle-pane-resize {:$easel '(keypath :easel) :pane-id ::root-pane}]])
+            (and (#{:press :repeat} action) (pos? (bit-and mods (if (.startsWith (System/getProperty "os.name") "Mac") ui/SUPER-MASK ui/CONTROL-MASK))))
+            (case key
+              75 [[::show-commands ""]]
+              74 [[::toggle-dock]]
+              (handler key scancode action mods))
+            :else (handler key scancode action mods))) view))))
 
 (defn initialize!
   ([] (initialize! {}))
-  ([{:keys [size preset] :or {size [1536 1024]}}]
-   (swap! app-state #(or % {:easel (assoc (make-easel) :$ref '(keypath :easel))}))
-   (swap! app-state update :easel resize-window size [1 1])
-   (when-not (get-in @app-state [:easel :packages-restored?])
-     ((requiring-resolve 'com.phronemophobic.easel.packages/restore!) handler)
-     (handler :update :easel assoc :packages-restored? true))
-   (when (and preset (empty? (get-in @app-state [:easel :applets])))
-     ((requiring-resolve 'com.phronemophobic.easel.workspace/initialize!) handler preset))
-   nil))
+  ([{:keys [size preset onboarding?] :or {size [1536 1024]}}]
+   (let [fresh? (nil? @app-state)]
+     (swap! app-state #(or % {:easel (assoc (make-easel) :$ref '(keypath :easel))}))
+     (swap! app-state update :easel resize-window size [1 1])
+     (when-not (get-in @app-state [:easel :packages-restored?])
+       ((requiring-resolve 'com.phronemophobic.easel.packages/restore!) handler)
+       (handler :update :easel assoc :packages-restored? true))
+     (when (and preset (nil? (get-in @app-state [:easel :workspace-id])))
+       ((requiring-resolve 'com.phronemophobic.easel.workspace/initialize!) handler preset))
+     (when (and fresh? onboarding? (not= help/version (:onboarding/version (settings/read-settings))))
+       (handler :update :easel assoc :help {:page :start :first-run? true :offset [0 0]}))
+     nil)))
 
 (declare remove-all-widgets!)
 
 (defn run
-  "Open the native Easel workspace asynchronously. Options include :size and :preset."
+  "Open an empty native workspace asynchronously. Options include :size, :preset, and :onboarding?."
   {:easel/see-also [com.phronemophobic.easel/make-easel
                     com.phronemophobic.easel/add-component-as-applet :start]}
   ([] (run {}))
-  ([{:keys [size preset] :or {size [1536 1024]} :as opts}]
-   (initialize! {:size size :preset (or (:preset opts) (:workspace (settings/read-settings)) :easel/sketchbook)})
+  ([{:keys [size preset onboarding?] :or {size [1536 1024] onboarding? true}}]
+   (initialize! {:size size :preset (or preset :easel/empty) :onboarding? onboarding?})
    (let [app (membrane.component/make-app #'easel-view app-state handler)
          options {:include-container-info true :window-title "Easel"
        :window-start-width (first size) :window-start-height (second size)
