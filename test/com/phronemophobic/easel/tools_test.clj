@@ -7,6 +7,7 @@
             [com.phronemophobic.easel.logging :as logging]
             [com.phronemophobic.easel.model :as model]
             [com.phronemophobic.easel.tap-watcher :as tap]
+            [com.rpl.specter :as specter]
             [membrane.component :as component])
   (:import [java.util.logging Logger]))
 
@@ -100,3 +101,78 @@
       ((:tapf applet) :stopped)
       (is (= 509 @(-> @state :applet :tap-vals peek :obj)))
       (finally (model/-stop applet)))))
+
+(deftest failing-subscriber-is-isolated
+  (let [received (atom [])
+        before (count (.getWatches events/history))
+        bad (events/subscribe! ::isolated (fn [_] (throw (AssertionError. "bad listener"))))
+        good (events/subscribe! ::isolated #(reset! received %))]
+    (try
+      (events/publish! {:kind ::isolated :message "still delivered"})
+      (is (= "still delivered" (:message (peek @received))))
+      (is (= "bad listener" (some-> (events/recent :exception) peek :throwable .getMessage)))
+      (finally (bad) (good)))
+    (is (= before (count (.getWatches events/history))))))
+
+(deftest reentrant-subscriber
+  (let [calls (atom 0)
+        stop (events/subscribe! ::reentrant
+                                (fn [entries]
+                                  (when (seq entries)
+                                    (swap! calls inc)
+                                    (events/publish! {:kind ::reentrant :message "nested"}))))]
+    (try
+      (events/publish! {:kind ::reentrant :message "outer"})
+      (is (= 1 @calls))
+      (is (= "nested" (:message (peek (events/recent ::reentrant)))))
+      (finally (stop)))))
+
+(deftest notifications-from-a-new-thread
+  (let [kind (random-uuid) finished (promise) received (promise)
+        stop (events/subscribe! kind
+                                (fn [entries]
+                                  (case (:message (peek entries))
+                                    "outer" (future (events/publish! {:kind kind :message "inner"})
+                                                    (deliver finished true))
+                                    "inner" (deliver received true)
+                                    nil)))]
+    (try
+      (events/publish! {:kind kind :message "outer"})
+      (is (deref finished 1000 false))
+      (is (deref received 1000 false))
+      (finally (stop)))))
+
+(deftest asynchronous-task-results
+  (let [state (atom {:panel {}}) handler (component/default-handler state)
+        path (specter/must :panel)
+        entered (promise) release (promise)
+        stale (applet/task! handler path #(do (deliver entered true) @release {:value :old}))]
+    (is (deref entered 1000 false))
+    @(applet/task! handler path (fn [] {:value :new}))
+    (deliver release true)
+    @stale
+    (is (= :new (get-in @state [:panel :value])))
+    @(applet/task! handler path #(throw (AssertionError. "task failure")))
+    (is (= "task failure" (get-in @state [:panel :error])))
+    (is (false? (get-in @state [:panel :busy?])))))
+
+(deftest closing-a-pending-task
+  (let [state (atom {:panel {}}) handler (component/default-handler state)
+        entered (promise) release (promise) calls (atom 0)
+        task (applet/task! handler (specter/must :panel)
+                           #(do (deliver entered true) @release {:value :late})
+                           (fn [_] (swap! calls inc)))]
+    (is (deref entered 1000 false))
+    (swap! state dissoc :panel)
+    (deliver release true)
+    @task
+    (is (empty? @state))
+    (is (zero? @calls))))
+
+(deftest bounded-and-failing-previews
+  (is (= "{:a nil}" (inspector/preview {:a nil})))
+  (is (<= (count (inspector/preview {:huge (apply str (repeat 10000 "x"))})) 241))
+  (let [bad (proxy [Object] [] (toString [] (throw (IllegalStateException. "unprintable"))))]
+    (is (re-find #"could not be printed" (inspector/preview bad))))
+  (let [bad (lazy-seq (throw (IllegalStateException. "broken sequence")))]
+    (is (re-find #"broken sequence" (:error (inspector/page bad 0))))))

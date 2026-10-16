@@ -8,8 +8,9 @@
   (let [buffer (StringBuilder.)
         flush-line (fn []
                      (when (pos? (.length buffer))
-                       (logging/log! level (.toString buffer))
-                       (.setLength buffer 0)))
+                       (let [line (.toString buffer)]
+                         (.setLength buffer 0)
+                         (logging/log! level line))))
         write-text (fn [text]
                      (locking buffer
                        (.write output ^String text)

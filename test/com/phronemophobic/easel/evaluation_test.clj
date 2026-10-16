@@ -41,3 +41,14 @@
     (is (= 100 (get-in @state [:applet :state :editor :height])))
     (is (zero? (get-in @state [:applet :state :editor :cursor :row])))
     (model/-stop applet)))
+
+(deftest logging-from-an-output-listener
+  (let [stop (events/subscribe! :log
+                                (fn [entries]
+                                  (when (= ":hello" (:message (peek entries)))
+                                    (println "listener"))))]
+    (try
+      (let [output (with-out-str (evaluation/evaluate "(println :hello)" {:ns *ns*}))]
+        (is (= ":hello\nlistener\n" output))
+        (is (= [":hello" "listener"] (mapv :message (take-last 2 (events/recent :log))))))
+      (finally (stop)))))

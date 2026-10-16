@@ -4,6 +4,8 @@
 
 (defonce history (atom {:next-id 0 :events []}))
 
+(def ^:dynamic *notifying* #{})
+
 (defn bounded-conj [xs x limit]
   (let [xs (conj (vec xs) x)]
     (if (> (count xs) limit)
@@ -25,8 +27,15 @@
   (let [key (random-uuid)
         active? (atom true)
         notify (fn []
-                 (when @active?
-                   (callback (recent kind))))]
+                 (let [invocation [key (Thread/currentThread)]]
+                   (when (and @active? (not (contains? *notifying* invocation)))
+                     (binding [*notifying* (conj *notifying* invocation)]
+                       (try
+                         (callback (recent kind))
+                         (catch Throwable e
+                           (reset! active? false)
+                           (remove-watch history key)
+                           (publish! {:kind :exception :throwable e})))))))]
     (add-watch history key (fn [_ _ _ _] (notify)))
     (notify)
     (fn []
