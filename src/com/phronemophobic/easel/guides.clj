@@ -50,7 +50,7 @@
     ["Clobber's Clojure buffers evaluate the preceding form with C-x C-e, the top-level form with C-M-x, and the whole buffer with C-c C-k. Results appear inline; printed output goes to Logs and failures go to Exceptions. The buffer's namespace determines where forms run."
      "Use Data Inspector to navigate a returned value, its metadata, or its datafy representation. Tap Watcher follows tap> values. NS Watcher follows vars in a chosen namespace. These are different views of the same running Clojure process."
      "Redefine a view var to change presentation while keeping applet state. A failed applet offers Retry, which makes a fresh instance from its factory. Hiding a pane preserves its resources and state; closing it releases them."
-     "FlowStorm is optional: start Easel with clojure -M:flowstorm to make its runtime available, then use the FlowStorm applet to record or inspect execution."]
+     "Install FlowStorm from Tools, then open its applet to record and inspect execution. It joins the running Clojure process without requiring a separate launch command."]
     :examples
     [{:title "Metadata is ordinary data"
       :source "(require '[clojure.datafy :as datafy]\n         '[com.phronemophobic.easel.model :as model])\n{:namespace (ns-name (:ns (meta #'model/IApplet)))\n :methods (-> model/IApplet :sigs keys sort vec)\n :metadata (datafy/datafy (meta #'model/IApplet))}"}]

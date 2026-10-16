@@ -1527,6 +1527,7 @@
                          (when (zero? (swap! live-windows dec))
                            (reset! window-ready? false)
                            (try
+                             (when-let [stop (resolve 'com.phronemophobic.easel.flowstorm/shutdown!)] (stop))
                              (when-let [suspend (resolve 'com.phronemophobic.easel.packages/suspend!)] (suspend handler))
                              (catch Throwable e (events/report! e))
                              (finally
