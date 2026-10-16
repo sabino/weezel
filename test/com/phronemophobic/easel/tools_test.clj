@@ -6,6 +6,8 @@
             [com.phronemophobic.easel.inspector :as inspector]
             [com.phronemophobic.easel.logging :as logging]
             [com.phronemophobic.easel.model :as model]
+            [com.phronemophobic.easel :as easel]
+            [com.phronemophobic.easel.spreadsheet :as spreadsheet]
             [com.phronemophobic.easel.tap-watcher :as tap]
             [com.rpl.specter :as specter]
             [membrane.component :as component])
@@ -176,3 +178,40 @@
     (is (re-find #"could not be printed" (inspector/preview bad))))
   (let [bad (lazy-seq (throw (IllegalStateException. "broken sequence")))]
     (is (re-find #"broken sequence" (:error (inspector/page bad 0))))))
+
+(deftest spreadsheet-evaluates-and-releases-its-worker
+  (let [previous @easel/app-state
+        before (count (.getWatches easel/app-state))
+        applet (model/-start (spreadsheet/spreadsheet-applet easel/handler)
+                             '(keypath :sheet) [640 480] [1 1])
+        wait-until (fn [f] (loop [n 200] (or (f) (when (pos? n) (Thread/sleep 10) (recur (dec n))))))]
+    (try
+      (reset! easel/app-state {:sheet applet})
+      (run! #(%) (::model/queue applet))
+      (let [worker (:thread @(:worker* applet))]
+        (is (= (inc before) (count (.getWatches easel/app-state))))
+        (easel/handler :update '(keypath :sheet) assoc :ss [{:id :answer :name "answer" :editor :code-editor :src "(+ 20 22)"}])
+        (is (wait-until #(contains? (:results (:sheet @easel/app-state)) :answer)))
+        (is (= 42 @(get-in @easel/app-state [:sheet :results :answer])))
+        (model/-stop applet)
+        (model/-stop applet)
+        (.join ^Thread worker 2000)
+        (is (not (.isAlive ^Thread worker)))
+        (is (= before (count (.getWatches easel/app-state)))))
+      (finally (model/-stop applet) (reset! easel/app-state previous)))))
+
+(deftest spreadsheet-closed-before-start-does-not-create-a-worker
+  (let [applet (model/-start (spreadsheet/spreadsheet-applet easel/handler)
+                             '(keypath :sheet) [640 480] [1 1])]
+    (model/-stop applet)
+    (run! #(%) (::model/queue applet))
+    (is (nil? @(:worker* applet)))))
+
+(deftest throwables-are-navigable-data
+  (let [error (ex-info "install failed" {:package :easel/flowstorm})
+        state (inspector/initial-state error)
+        data (inspector/display-value error)
+        child (inspector/descend state :data (:data data))]
+    (is (= "install failed" (:cause data)))
+    (is (= {:package :easel/flowstorm} @(:obj child)))
+    (is (identical? error @(:obj (peek (:parents child)))))))

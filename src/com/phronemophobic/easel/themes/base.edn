@@ -21,7 +21,7 @@
   :color/code-string "#32734A"
   :color/code-symbol "#111827"
   :color/code-definition "#7A249A"
-  :color/code-comment "#7F8C9E"
+  :color/code-comment "#64748B"
   :font/ui ["Helvetica Neue" "Arial" "sans-serif"]
   :font/code ["Menlo" "monospace"]
   :font/size 14

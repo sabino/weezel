@@ -68,7 +68,8 @@
                  (let [new-val (specter/select-one path new)
                        old-val (specter/select-one path old)]
                    (when (not= new-val old-val)
-                     (f key ref old-val new-val)))))))
+                     (f key ref old-val new-val)))))
+    #(remove-watch app-state key)))
 
 
 

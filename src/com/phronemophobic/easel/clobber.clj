@@ -61,8 +61,7 @@
                        {:$editor $editor
                         :msg (if (= scope :buffer)
                                "buffer loaded."
-                               (viscous/inspector {:obj (viscous/wrap value)
-                                                   :width 40 :height 1 :show-context? false}))})))))))
+                               (inspector/preview value))})))))))
 
 (defeffect ::eval-last [m] (evaluate-editor! dispatch! m :last))
 (defeffect ::eval-top [m] (evaluate-editor! dispatch! m :top))
@@ -168,7 +167,10 @@
 (defn editor-palette [context]
   (merge {[0 0 0] (theme/token context :color/text)
           [0.98 0.98 0.98] (theme/token context :color/surface)
-          [0.85 0.85 0.85] (theme/token context :color/header)}
+          [0.85 0.85 0.85] (theme/token context :color/header)
+          [1.0 0.8431372549019608 0.5294117647058824 0.7] (theme/token context :color/selection)
+          [1 0 1 0.2] (theme/token context :color/selection)
+          [0.3725490196078431 0.8431372549019608 0.8431372549019608] (theme/token context :color/selection)}
          (into {} (for [[capture token] {"number" :color/code-string "string" :color/code-string
                                          "constant.builtin" :color/code-definition "constant" :color/code-keyword
                                          "comment" :color/code-comment "defn" :color/code-definition}]

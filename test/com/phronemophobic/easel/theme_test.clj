@@ -45,3 +45,26 @@
     (is (= [240 36] (ui/bounds (app)))))
   (let [view (eui/button {:text "Disabled" :disabled? true :on-click #(vector [:test])})]
     (is (empty? (ui/mouse-down view [5 5])))))
+
+(defn luminance [rgb]
+  (reduce + (map * [0.2126 0.7152 0.0722]
+                 (map #(if (<= % 0.04045) (/ % 12.92) (Math/pow (/ (+ % 0.055) 1.055) 2.4)) rgb))))
+
+(deftest code-remains-readable-in-both-themes
+  (doseq [id [:easel/studio-light :easel/studio-dark]
+          token [:color/code-symbol :color/code-comment :color/code-string :color/code-keyword :color/code-definition]]
+    (let [context {::theme/value (theme/resolve-theme (theme/builtin id))}
+          a (luminance (theme/token context token)) b (luminance (theme/token context :color/surface))]
+      (is (>= (/ (+ (max a b) 0.05) (+ (min a b) 0.05)) 4.5) (str id " " token)))))
+
+(deftest source-highlighting-preserves-incomplete-and-unicode-code
+  (doseq [source ["(defn hello [x] ; comment\n {:résultat (str \"λ🙂\" x) :ok true :n 42})"
+                  "#\"a\\\"b\" \\space 'x ::keyword" "(str \"unfinished" "#_ (danger!)" ""
+                  (str "\"" (apply str (repeat 20000 "x")) "\"")]]
+    (is (= source (apply str (map :text (eui/code-spans source))))))
+  (let [spans (eui/code-spans "(defn hi [] {:message \"hello\"}) ; note")
+        color #(some (fn [span] (when (= % (:text span)) (:token span))) spans)]
+    (is (= :color/code-definition (color "defn")))
+    (is (= :color/code-keyword (color ":message")))
+    (is (= :color/code-string (color "\"hello\"")))
+    (is (= :color/code-comment (color "; note")))))

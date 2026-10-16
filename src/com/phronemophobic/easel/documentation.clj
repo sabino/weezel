@@ -306,7 +306,7 @@
                   source (if ns (str "(clojure.core/refer '" ns ")\n" source) source)]
               (ui/vertical-layout
                (eui/label (or title (str "Example " (inc index))))
-               (ui/padding 0 6 (eui/label source {:role :code :size 12}))
+               (ui/padding 0 6 (eui/code {:text source :width width :size 12}))
                (row-layout width
                 [(applet/button {:text "Run" :size :small
                                   :extra (get extra [::example id :run])
@@ -502,7 +502,7 @@
                   (ui/fixed-bounds [width 72]
                    [(eui/surface context width 72 :color/header 4)
                     (eui/border context width 72 :color/border 4)
-                    (ui/translate 12 10 (eui/text {:text source :role :code :width (max 1 (- width 84)) :size 12}))
+                    (ui/translate 12 10 (eui/code {:text source :width (max 1 (- width 84)) :size 12}))
                     (ui/translate (max 0 (- width 62)) 6
                       (eui/button {:text "Run" :height 28 :disabled? (or (not (:ready? state)) (:busy? state))
                                    :on-click #(vector [::run-example $state id runnable])}))

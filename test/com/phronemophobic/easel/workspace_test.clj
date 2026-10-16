@@ -119,7 +119,8 @@
         (let [initial (:easel @easel/app-state) initial-root (:root-pane initial)
               initial-dock (:dock initial)
               scene* (:source* (sketchbook/session))
-              watch-count (count (.getWatches ^clojure.lang.IRef scene*))]
+              watch-count (await-value #(let [n (count (.getWatches ^clojure.lang.IRef scene*))]
+                                          (when (= 2 n) n)))]
           (is (= 2 watch-count))
           (is (= 5 (count (:applets initial))))
           (is (= [1536 1024] (ui/bounds ((component/make-app #'easel/easel-view easel/app-state easel/handler)))))

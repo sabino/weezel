@@ -41,7 +41,7 @@
         history (apply ui/vertical-layout
                        (for [entry (:entries state)]
                          (ui/vertical-layout
-                          (eui/text {:text (str (:ns state) "> " (:source entry)) :role :code :width (max 1 (- w 40))})
+                          (eui/code {:text (str (:ns state) "> " (:source entry)) :width (max 1 (- w 40))})
                           (ui/on :mouse-down
                             (fn [_]
                               [[:com.phronemophobic.easel/add-applet

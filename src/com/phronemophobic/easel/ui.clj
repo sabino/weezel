@@ -29,6 +29,33 @@
    (para/paragraph (str s) (:width opts)
                    {:paragraph-style/text-style (text-style nil opts)})))
 
+(def code-forms
+  #{"ns" "def" "defn" "defn-" "defonce" "defui" "defrecord" "defprotocol" "defmulti" "defmethod"
+    "fn" "let" "letfn" "if" "if-let" "if-some" "when" "when-let" "when-some" "cond" "cond->" "case"
+    "do" "doseq" "for" "loop" "recur" "try" "catch" "finally" "throw" "binding" "with-open" "reify"
+    "extend-protocol" "and" "or" "->" "->>" "some->" "some->>" "doto" "quote" "var"})
+
+(defn code-spans [source]
+  (mapv (fn [s]
+          {:text s :token (cond
+                            (.startsWith ^String s ";") :color/code-comment
+                            (or (.startsWith ^String s "\"") (.startsWith ^String s "#\"")
+                                (.startsWith ^String s "\\")) :color/code-string
+                            (.startsWith ^String s ":") :color/code-keyword
+                            (or (code-forms s) (#{"nil" "true" "false"} s)) :color/code-definition
+                            (re-matches #"[+-]?\d[^\s]*" s) :color/code-string
+                            :else :color/code-symbol)})
+        (re-seq #"(?s);[^\r\n]*|#?\"(?:\\.|[^\"\\])*+(?:\"|$)|\\(?:[A-Za-z][A-Za-z0-9]*|.)|[\s,]+|[\[\]{}()\";'`~@^]|[^\s,\[\]{}()\";'`~@^]+" (str source))))
+
+(defn code-paragraph [context text width size]
+  (let [base (text-style context {:role :code :size size})]
+    (para/paragraph
+     (mapv (fn [{:keys [text token]}]
+             {:text text :style (assoc base :text-style/color (theme/token context token))}) (code-spans text))
+     width {:paragraph-style/text-style base})))
+
+(defui code [{:keys [text width size]}] (code-paragraph context text width size))
+
 (defn adapt-colors
   "Adapt a native component's palette without changing its event handlers."
   [view palette]
@@ -44,7 +71,10 @@
                (mapv #(adapt-colors % palette) children)
                :else view)
         replace-color #(get palette % %)
-        style #(cond-> % (:text-style/color %) (update :text-style/color replace-color))]
+        style #(cond-> %
+                 (:text-style/color %) (update :text-style/color replace-color)
+                 (get-in % [:text-style/background-color :color])
+                 (update-in [:text-style/background-color :color] replace-color))]
     (cond-> view
       (and (map? view) (:color view)) (update :color replace-color)
       (instance? membrane.skia.paragraph.Paragraph view)
@@ -102,8 +132,9 @@
                [(when background (surface context w h background radius))
                 (when (and (not (#{:text :link} variant)) (not= variant :primary))
                   (border context w h :color/border radius))
-                (ui/translate (if width (or padding 12) (/ (- w (ui/width body)) 2))
-                              (/ (- h (ui/height body)) 2) body)])]
+                (ui/scissor-view [0 0] [w h]
+                  (ui/translate (if width (or padding 12) (/ (- w (ui/width body)) 2))
+                                (/ (- h (ui/height body)) 2) body))])]
     (basic/on-hover
      {:hover? hover? :$body nil
       :body (ui/on :mouse-down (fn [_] (when (and on-click (not disabled?)) (on-click))) body)})))
@@ -117,7 +148,8 @@
         px (if (= variant :bare) 0 (or padding 12))
         py (/ (- h (* 1.5 (theme/token context (if (= role :code) :font/code-size :font/size)))) 2)
         focused? (and (= focus (or focus-id $text)) (not disabled?))
-        paragraph (para/paragraph text nil {:paragraph-style/text-style (text-style context {:role role})})
+        paragraph (if (= role :code) (code-paragraph context text nil nil)
+                      (para/paragraph text nil {:paragraph-style/text-style (text-style context {:role role})}))
         clamped-cursor (max 0 (min cursor (count text)))
         cursor-rect (first (para/get-rects-for-range (assoc paragraph :paragraph (str text " "))
                                                     clamped-cursor (inc clamped-cursor) :max :tight))
