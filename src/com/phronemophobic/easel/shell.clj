@@ -63,6 +63,8 @@
                       (for [a applets]
                         (navigation-row
                          {:text (str (:label a)) :icon (or (:icon a) "file") :width (- width 20)
+                          :extra (get extra [::applet (:id a)])
+                          :$extra [$extra (list 'keypath [::applet (:id a)])]
                           :selected? (= active (:id a))
                           :on-click #(vector [:com.phronemophobic.easel/focus-applet (:id a)])})))
                (navigation-row {:text "Add applet" :icon "plus" :width (- width 20)

@@ -86,6 +86,7 @@
          x (+ x ox) y (+ y oy)
          button (when (instance? com.phronemophobic.easel.ui.Button view)
                   {:text (:text view) :hover? (:hover? view) :disabled? (:disabled? view)
+                   :selected? (:selected? view)
                    :x x :y y :size (ui/bounds view)})
          [dx dy] (cond
                    (instance? membrane.ui.Padding view) [(:left view) (:top view)]
@@ -98,6 +99,65 @@
   (let [view (app)]
     (ui/mouse-move view position)
     (ui/mouse-move-global view position)))
+
+(deftest workspace-navigation-controls-have-independent-hover-state
+  (let [ids [:first-user :terminal :inspector :git :documentation :second-user]
+        labels ["user" "term" "Data Inspector" "Git" "Documentation" "user"]
+        easel {:applets (into {} (map (fn [id label] [id {:id id :label label}]) ids labels))
+               :root-pane {:panes (mapv #(hash-map :applet-id %) ids)}
+               :workspace-id 1
+               :workspaces {:by-id {1 {:name "Workspace"} 2 {:name "Data lab"} 3 {:name "Workspace"}}}}
+        manager (assoc easel :manager-id :manager
+                       :applets {:manager {:state {:page :discover
+                                                   :registry {:test/a {:id :test/a :name "Shared name" :kind :toolset}
+                                                              :test/b {:id :test/b :name "Shared name" :kind :toolset}}}}})]
+    (doseq [[view args]
+            [[#'shell/sidebar {:easel easel :width 180 :height 1000}]
+             [#'shell/sidebar {:easel manager :width 180 :height 1000}]
+             [#'shell/workspace-tabs {:easel easel :width 1000 :height 42}]
+             [#'shell/dock {:easel (assoc easel :dock {:selected :values})
+                           :width 1000 :height 240 :dock-body (ui/spacer 1000 190)}]]]
+      (testing (str view)
+        (let [state (atom (assoc args :membrane.component/context {:focus :inspector}))
+              app (component/make-app view state)
+              frames #(button-frames (app))
+              selected #(mapv (juxt :text :x :y) (filter :selected? (frames)))
+              initial-selection (selected)]
+          (is (< 1 (count (frames))))
+          (dotimes [_ 2]
+            (doseq [{:keys [text x y size]} (frames)]
+              (move-pointer app [(+ x 4) (+ y (/ (second size) 2))])
+              (is (= [[text x y]] (mapv (juxt :text :x :y) (filter :hover? (frames)))) text)
+              (is (= initial-selection (selected)) "Hover must not change selection")))
+          (move-pointer app [-20 -20])
+          (is (not-any? :hover? (frames)))
+          (is (= (:easel args) (:easel @state))))))))
+
+(deftest sidebar-rows-keep-their-applet-targets-after-reordering
+  (let [ids [:first :second :third]
+        state (atom {:easel {:applets (into {} (map #(vector % {:id % :label "user"}) ids))
+                             :root-pane {:panes (mapv #(hash-map :applet-id %) ids)}}
+                     :width 180 :height 800})
+        calls (atom []) base (component/default-handler state)
+        app (component/make-app #'shell/sidebar state
+              (fn [intents]
+                (doseq [[effect & args :as intent] intents]
+                  (if (= effect ::easel/focus-applet)
+                    (swap! calls conj (first args))
+                    (base [intent])))))
+        check-rows (fn [expected]
+                     (reset! calls [])
+                     (doseq [{:keys [x y size]} (filter #(= "user" (:text %)) (button-frames (app)))]
+                       (let [pos [(+ x 4) (+ y (/ (second size) 2))]]
+                         (move-pointer app pos)
+                         (is (= [[x y]] (mapv (juxt :x :y) (filter :hover? (button-frames (app))))))
+                         (ui/mouse-down (app) pos)))
+                     (is (= expected @calls)))]
+    (check-rows ids)
+    (swap! state update-in [:easel :root-pane :panes] #(vec (reverse %)))
+    (check-rows (vec (reverse ids)))
+    (swap! state update-in [:easel :root-pane :panes] subvec 1)
+    (check-rows [:second :first])))
 
 (deftest documentation-controls-have-independent-hover-state
   (doseq [[view args]
