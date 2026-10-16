@@ -7,12 +7,13 @@
    [membrane.basic-components :as basic]
    [membrane.alpha.component.drag-and-drop :as dnd]
    [com.phronemophobic.easel.model :as model]
+   [com.phronemophobic.easel.ui :as eui]
    [com.phronemophobic.easel.events :as events]
    [clojure.core.async :as async]
    [clojure.set :as set]
    [com.phronemophobic.viscous :as viscous]
 
-   [com.phronemophobic.membrandt :as ant]
+
    ))
 
 (defonce watch-list* (atom {}))
@@ -112,7 +113,7 @@
                  (fn [_]
                    [[::dnd/drag-start {::dnd/obj {:x (delay
                                                        (ns-resolve ns sym))}}]])
-                 (ui/label
+                 (eui/label
                   (name sym)
                   (ui/font "Menlo" 11)))
                 (viscous/inspector

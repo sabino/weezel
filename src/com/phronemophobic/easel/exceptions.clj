@@ -3,9 +3,9 @@
             [clojure.repl :as repl]
             [clojure.string :as str]
             [com.phronemophobic.easel.applet :as applet]
+            [com.phronemophobic.easel.ui :as eui]
             [com.phronemophobic.easel.events :as events]
             [com.phronemophobic.easel.inspector :as inspector]
-            [com.phronemophobic.membrandt :as ant]
             [membrane.basic-components :as basic]
             [membrane.component :refer [defui]]
             [membrane.ui :as ui]))
@@ -56,13 +56,13 @@
         hide-library? (:hide-library? state)]
     (ui/vertical-layout
      (ui/horizontal-layout
-      (ant/button {:text "Clear" :size :small
+      (eui/button {:text "Clear" :size :small
                    :on-click #(vector [:update $state assoc :entries [] :after-id
                                        (dec (:next-id @events/history))])})
-      (ant/button {:text (if hide-library? "Show library frames" "Hide library frames") :size :small
+      (eui/button {:text (if hide-library? "Show library frames" "Hide library frames") :size :small
                    :on-click #(vector [:update $state update :hide-library? not])})
       (when throwable
-        (ant/button {:text "Inspect" :size :small
+        (eui/button {:text "Inspect" :size :small
                      :on-click #(vector [:com.phronemophobic.easel/add-applet
                                          {:make-applet (fn [handler]
                                                          (inspector/inspector-applet handler throwable))}])})))
@@ -73,22 +73,22 @@
        (apply ui/vertical-layout
               (concat
                (for [entry (take 20 (reverse entries))]
-                 (ant/button {:text (str (:time entry) " " (some-> (:throwable entry) .getMessage))
+                 (eui/button {:text (str (:time entry) " " (some-> (:throwable entry) .getMessage))
                               :size :small
                               :on-click #(vector [:set [$state '(keypath :selected)] (:id entry)])}))
                (when throwable
                  (mapcat
                   (fn [{:keys [^Throwable throwable depth label]}]
                     (concat
-                     [(ui/label (str (apply str (repeat depth "  ")) label ": "
+                     [(eui/label (str (apply str (repeat depth "  ")) label ": "
                                       (.getName (class throwable)) ": " (.getMessage throwable)))
                       (when-let [data (ex-data throwable)]
-                        (ui/label (inspector/preview data)))]
+                        (eui/label (inspector/preview data)))]
                      (for [^StackTraceElement frame (.getStackTrace throwable)
                            :when (or (not hide-library?)
                                      (not (re-find #"^(java\.|jdk\.|sun\.|clojure\.)" (.getClassName frame))))]
                        (ui/on-click #(source-intents frame)
-                                    (ui/label (str "  " (repl/demunge (.getClassName frame)) "/"
+                                    (eui/label (str "  " (repl/demunge (.getClassName frame)) "/"
                                                    (.getMethodName frame) " (" (.getFileName frame) ":"
                                                    (.getLineNumber frame) ")"))))))
                   (causes throwable)))))}))))

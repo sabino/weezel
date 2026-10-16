@@ -2,9 +2,9 @@
   (:require [clojure.java.io :as io]
             [clojure.string :as str]
             [com.phronemophobic.easel.applet :as applet]
+            [com.phronemophobic.easel.ui :as eui]
             [com.phronemophobic.easel.diff :as diff]
             [com.phronemophobic.easel.process :as process]
-            [com.phronemophobic.membrandt :as ant]
             [membrane.basic-components :as basic]
             [membrane.component :refer [defui defeffect]]
             [membrane.ui :as ui]))
@@ -121,14 +121,14 @@
         actions-layout (if (< (first size) 200) ui/vertical-layout ui/horizontal-layout)
         header
         (ui/vertical-layout
-         (ant/text-input {:text directory :$text [$state '(keypath :directory)] :size :small
+         (eui/field {:text directory :$text [$state '(keypath :directory)] :size :small
                           :disabled? busy? :placeholder "Repository directory"})
          (applet/button {:text "Refresh" :size :small :disabled? busy?
                       :on-click #(vector [::refresh $state directory])})
-         (ui/label (str "Branch: " branch (when busy? " | Working…")))
-         (when (and stale? (not busy?)) (ui/label "Refresh to load this directory"))
-         (when error (ui/label error))
-         (ant/text-input {:text message :$text [$state '(keypath :message)] :size :small
+         (eui/label (str "Branch: " branch (when busy? " | Working…")))
+         (when (and stale? (not busy?)) (eui/label "Refresh to load this directory"))
+         (when error (eui/label error))
+         (eui/field {:text message :$text [$state '(keypath :message)] :size :small
                           :disabled? busy? :placeholder "Commit message"})
          (applet/button {:text "Commit staged" :size :small
                       :disabled? (or disabled? (str/blank? message)
@@ -136,7 +136,7 @@
                       :on-click #(vector [::change $state repository :commit message])})
          (when (> (count files) page-size)
            (ui/vertical-layout
-            (ui/label (str (inc offset) "–" (min (count files) (+ offset page-size)) " of " (count files) " files"))
+            (eui/label (str (inc offset) "–" (min (count files) (+ offset page-size)) " of " (count files) " files"))
             (ui/horizontal-layout
              (applet/button {:text "Previous" :size :small :disabled? (zero? offset)
                           :on-click #(vector [:set [$state '(keypath :offset)] (max 0 (- offset page-size))]
@@ -155,7 +155,7 @@
               (concat
                (for [entry (take page-size (drop offset files))]
                  (ui/vertical-layout
-                  (ui/label (str (:index entry) (:worktree entry) " " (:path entry)))
+                  (eui/label (str (:index entry) (:worktree entry) " " (:path entry)))
                   (actions-layout
                    (applet/button {:text "Stage" :size :small :disabled? (or disabled? (= " " (:worktree entry)))
                                 :on-click #(vector [::change $state repository :stage entry])})
@@ -168,10 +168,10 @@
                    (applet/button {:text "Staged diff" :size :small
                                 :disabled? (or disabled? (#{" " "?" "!"} (:index entry)))
                                 :on-click #(vector [::diff $state repository entry true])}))))
-               [(ui/label "Recent commits")]
+               [(eui/label "Recent commits")]
                (for [commit history]
                  (ui/on-click #(when-not disabled? [[::show-commit $state repository (:hash commit)]])
-                              (ui/label (str (:hash commit) " " (:subject commit) " | " (:author commit)))))))}))))
+                              (eui/label (str (:hash commit) " " (:subject commit) " | " (:author commit)))))))}))))
 
 (defn git-applet
   ([handler] (git-applet handler (System/getProperty "user.dir")))

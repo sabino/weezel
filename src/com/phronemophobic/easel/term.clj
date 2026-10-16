@@ -7,6 +7,8 @@
    [asciinema.vt.screen :as screen]
    [com.phronemophobic.easel.applet :as applet]
    [com.phronemophobic.easel.events :as events]
+   [com.phronemophobic.easel.theme :as theme]
+   [com.phronemophobic.easel.ui :as eui]
    [com.phronemophobic.membrane.term :as term]
    [membrane.ui :as ui]
    [clojure.java.io :as io])
@@ -17,26 +19,35 @@
 (def term-view @#'term/term-view)
 (def repaint! @#'skia/glfw-post-empty-event)
 
-(def term-font
-  (if (skia/font-exists? (ui/font "Menlo" 11))
+(def load-font
+  (memoize (fn [family size]
+  (if (skia/font-exists? (ui/font family size))
     (#'term/load-terminal-font skia/toolkit
-                               "Menlo"
-                               11)
+                               family size)
     (#'term/load-terminal-font skia/toolkit
                                (skia/logical-font->font-family :monospace)
-                               11)))
+                               size)))))
+
+(defn terminal-font [context]
+  (load-font (first (theme/token context :font/code)) (theme/token context :font/code-size)))
 
 (defn term-ui [this $context context]
   (let [focus (:focus context)
         focus? (= focus (:id this))
+        font (terminal-font context)
+        scheme (merge term/default-color-scheme
+                      {:background (theme/token context :color/surface)
+                       :foreground (theme/token context :color/text)
+                       :cursor (theme/token context :color/accent)
+                       :cursor-text (theme/token context :color/surface)})
         view
         (ui/on
          :mouse-down
          (fn [_]
            [[:set [$context (list 'keypath :focus)]
              (:id this)]])
-         (term-view term/default-color-scheme
-                    term-font
+         (term-view scheme
+                    font
                     (:vt this)))
         view (if focus?
                (ui/wrap-on
@@ -49,12 +60,7 @@
                   (term-events pty view)
                   view))
                view)
-        view (ui/fill-bordered
-              (if focus?
-                [0.8 0.8 0.8]
-                [0.95 0.95 0.95])
-              10
-              view)]
+        view (ui/padding 10 10 view)]
     view))
 
 (defn debounce-chan
@@ -86,8 +92,9 @@
     in))
 
 (defn terminal-size [[w h]]
-  [(int (max 80 (quot (max 0 (- w 20)) (:membrane.term/cell-width term-font))))
-   (int (max 13 (quot (max 0 (- h 20)) (:membrane.term/cell-height term-font))))])
+  (let [font (terminal-font nil)]
+    [(int (max 1 (quot (max 0 (- w 20)) (:membrane.term/cell-width font))))
+     (int (max 1 (quot (max 0 (- h 20)) (:membrane.term/cell-height font))))]))
 
 (defn resize-screen [screen cols rows]
   (let [drop-rows (max 0 (- (inc (get-in screen [:cursor :y])) rows))
@@ -192,7 +199,7 @@
   (-ui [this $context context]
     (let [view (term-ui this $context context)]
       (if (:exited? this)
-        (ui/vertical-layout (ui/label "Process exited") (ui/no-events view))
+        (ui/vertical-layout (eui/label "Process exited") (ui/no-events view))
         view)))
   model/IResizable
   (-resize [this size _content-scale]

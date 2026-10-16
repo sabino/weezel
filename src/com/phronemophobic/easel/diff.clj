@@ -2,8 +2,8 @@
   (:require [clojure.java.io :as io]
             [clojure.string :as str]
             [com.phronemophobic.easel.applet :as applet]
+            [com.phronemophobic.easel.ui :as eui]
             [com.phronemophobic.easel.process :as process]
-            [com.phronemophobic.membrandt :as ant]
             [membrane.basic-components :as basic]
             [membrane.component :refer [defui defeffect]]
             [membrane.ui :as ui])
@@ -72,7 +72,7 @@
         lines (or (:lines state) (patch-lines (or patch "")))
         offset (min (:offset state 0) (* page-size (quot (max 0 (dec (count lines))) page-size)))
         footer (ui/vertical-layout
-                (ui/label (str " " (if (seq lines) (inc offset) 0) "–" (min (count lines) (+ offset page-size))
+                (eui/label (str " " (if (seq lines) (inc offset) 0) "–" (min (count lines) (+ offset page-size))
                                " of " (count lines) " lines "))
                 (ui/horizontal-layout
                  (applet/button {:text "Previous" :size :small :disabled? (zero? offset)
@@ -84,13 +84,13 @@
         header (ui/vertical-layout
      (when compare?
        (ui/vertical-layout
-        (ant/text-input {:text (or before "") :$text [$state '(keypath :before)] :size :small :placeholder "Before file"})
-        (ant/text-input {:text (or after "") :$text [$state '(keypath :after)] :size :small :placeholder "After file"})
+        (eui/field {:text (or before "") :$text [$state '(keypath :before)] :size :small :placeholder "Before file"})
+        (eui/field {:text (or after "") :$text [$state '(keypath :after)] :size :small :placeholder "After file"})
         (applet/button {:text "Compare files" :size :small
                      :disabled? (or busy? (str/blank? before) (str/blank? after))
                      :on-click #(vector [::compare-files $state before after])})))
-     (when error (ui/label error))
-     (when busy? (ui/label "Comparing…")))]
+     (when error (eui/label error))
+     (when busy? (eui/label "Comparing…")))]
     (ui/vertical-layout
      header
      (basic/scrollview
@@ -108,14 +108,10 @@
                          {:make-applet (fn [handler]
                                          ((requiring-resolve 'com.phronemophobic.easel.clobber/clobber-applet)
                                           handler {:file (io/file file) :line new-line}))}]]))
-                   (ui/with-color (case kind
-                                    :add [0.1 0.5 0.15]
-                                    :remove [0.7 0.15 0.15]
-                                    :hunk [0.2 0.3 0.7]
-                                    [0.15 0.15 0.15])
-                     (ui/label (format "%5s %5s %s" (or old-line "") (or new-line "") text)
-                               (ui/font "Menlo" 11))))))
-         (ui/label "No differences"))})
+                   (eui/label (format "%5s %5s %s" (or old-line "") (or new-line "") text)
+                              {:role :code :size 12 :color (case kind :add :color/live :remove :color/error
+                                                                     :hunk :color/accent :color/text)}))))
+         (eui/label "No differences"))})
      footer)))
 
 (defn diff-applet [_handler info]

@@ -1,7 +1,7 @@
 (ns com.phronemophobic.easel.flowstorm
   (:require [clojure.string :as str]
             [com.phronemophobic.easel.applet :as applet]
-            [com.phronemophobic.membrandt :as ant]
+            [com.phronemophobic.easel.ui :as eui]
             [membrane.component :refer [defui defeffect]]
             [membrane.basic-components :as basic]
             [membrane.ui :as ui]))
@@ -62,7 +62,7 @@
      {:scroll-bounds size :$body nil
       :body
       (ui/vertical-layout
-     (ui/label (str "FlowStorm | " (if started? "Running" "Stopped")
+     (eui/label (str "FlowStorm | " (if started? "Running" "Stopped")
                     " | " (if recording? "Recording" "Paused")))
      (ui/vertical-layout
       (applet/button {:text "Refresh" :size :small :disabled? busy?
@@ -76,15 +76,15 @@
                    :on-click #(vector [::perform $state (if recording? :pause :record) nil])})
       (applet/button {:text "Stop" :size :small :disabled? (or busy? (not started?))
                    :on-click #(vector [::perform $state :stop nil])}))
-     (ant/text-input {:text target :$text [$state '(keypath :target)] :size :small
+     (eui/field {:text target :$text [$state '(keypath :target)] :size :small
                       :placeholder "namespace/function"})
      (ui/vertical-layout
       (applet/button {:text "Instrument var" :size :small :disabled? (or busy? (not started?) (str/blank? target))
                    :on-click #(vector [::perform $state :instrument target])})
       (applet/button {:text "Uninstrument var" :size :small :disabled? (or busy? (not started?) (str/blank? target))
                    :on-click #(vector [::perform $state :uninstrument target])}))
-     (when-let [error (:error state)] (ui/label error))
-     (apply ui/vertical-layout (map #(ui/label (str %)) (sort instrumented))))})))
+     (when-let [error (:error state)] (eui/label error))
+     (apply ui/vertical-layout (map #(eui/label (str %)) (sort instrumented))))})))
 
 (defn flowstorm-applet [handler]
   (applet/tool-applet

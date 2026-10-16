@@ -81,7 +81,7 @@
                    (apply str (map #(str " line-" % "\n") (range 10000))))
         state (atom {:state (:state (diff/diff-applet nil {:patch patch})) :size [640 480]})
         app (component/make-app #'diff/diff-view state)
-        texts #(keep :text (view-nodes (app)))]
+        texts #(keep (fn [node] (or (:text node) (:paragraph node))) (view-nodes (app)))]
     (is (< (count (texts)) 1000))
     (is (some #(and (string? %) (.contains ^String % "line-0")) (texts)))
     (is (not-any? #(and (string? %) (.contains ^String % "line-9999")) (texts)))

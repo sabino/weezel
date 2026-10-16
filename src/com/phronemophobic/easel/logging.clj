@@ -1,9 +1,9 @@
 (ns com.phronemophobic.easel.logging
   (:require [clojure.string :as str]
             [com.phronemophobic.easel.applet :as applet]
+            [com.phronemophobic.easel.ui :as eui]
             [com.phronemophobic.easel.events :as events]
             [com.phronemophobic.easel.inspector :as inspector]
-            [com.phronemophobic.membrandt :as ant]
             [membrane.basic-components :as basic]
             [membrane.component :refer [defui]]
             [membrane.ui :as ui])
@@ -68,17 +68,17 @@
                                  level query (:after-id state -1))]
     (ui/vertical-layout
      (ui/horizontal-layout
-      (ant/button {:text (if paused? "Resume" "Pause") :size :small
+      (eui/button {:text (if paused? "Resume" "Pause") :size :small
                    :on-click #(vector [:update $state assoc :paused? (not paused?) :snapshot entries])})
-      (ant/button {:text "Clear" :size :small
+      (eui/button {:text "Clear" :size :small
                    :on-click #(vector [:set [$state '(keypath :after-id)]
                                        (dec (:next-id @events/history))])})
-      (ui/label (str " " (count visible) " logs")))
+      (eui/label (str " " (count visible) " logs")))
      (apply ui/horizontal-layout
             (for [l [:trace :debug :info :warn :error]]
-              (ant/button {:text (str (when (= l level) "• ") (name l)) :size :small
+              (eui/button {:text (str (when (= l level) "• ") (name l)) :size :small
                            :on-click #(vector [:set [$state '(keypath :level)] l])})))
-     (ant/text-input {:text query :$text [$state '(keypath :query)] :size :small :placeholder "Filter logs"})
+     (eui/field {:text query :$text [$state '(keypath :query)] :size :small :placeholder "Filter logs"})
      (basic/scrollview
       {:scroll-bounds [(max 0 (first size)) (max 0 (- (second size) 95))]
        :$body nil
@@ -86,13 +86,13 @@
        (apply ui/vertical-layout
               (for [entry (reverse visible)]
                 (ui/horizontal-layout
-                 (ant/button {:text "Inspect" :size :small
+                 (eui/button {:text "Inspect" :size :small
                               :on-click #(vector [:com.phronemophobic.easel/add-applet
                                                   {:make-applet (fn [handler]
                                                                   (inspector/inspector-applet handler entry))}])})
-                 (ui/with-color (if (#{:error :warn} (:level entry)) [0.7 0.2 0.1] [0.1 0.1 0.1])
-                   (ui/label (str (:time entry) " " (name (:level entry)) " "
-                                  (:logger entry) " " (:message entry)))))))}))))
+                 (eui/label (str (:time entry) " " (name (:level entry)) " "
+                                  (:logger entry) " " (:message entry))
+                            {:role :code :size 12 :color (case (:level entry) :error :color/error :warn :color/warning :color/text)}))))}))))
 
 (defn logging-applet [handler]
   (applet/tool-applet

@@ -6,6 +6,7 @@
    [membrane.ui :as ui]
    [membrane.alpha.component.drag-and-drop :as dnd]
    [com.phronemophobic.easel.model :as model]
+   [com.phronemophobic.easel.ui :as eui]
    [membrane.basic-components :as basic]
    [clojure.core.async :as async]
    [clojure.set :as set]
@@ -14,7 +15,6 @@
    [com.phronemophobic.easel.inspector :as inspector]
    [com.phronemophobic.easel.exceptions :as exceptions]
    [com.phronemophobic.viscous :as viscous]
-
    [com.phronemophobic.membrandt :as ant]))
 
 (defeffect ::tap-drop-object [drop-object]
@@ -74,14 +74,14 @@
       (apply
        ui/vertical-layout
        (ui/horizontal-layout
-        (ant/button {:size :small
+        (eui/button {:size :small
                      :text "Clear"
                      :on-click (fn [] [[:set $tap-vals []]])})
-        (ant/button {:size :small
+        (eui/button {:size :small
                      :text (if paused? "Resume" "Pause")
                      :on-click (fn [] [[:update $paused? not]])})
-        (ui/label (str " " (count tap-vals) " taps"))
-        (ant/text-input {:text query :size :small :placeholder "Filter taps"}))
+        (eui/label (str " " (count tap-vals) " taps"))
+        (eui/field {:text query :size :small :placeholder "Filter taps"}))
        (eduction
         (filter (fn [entry]
                   (str/includes? (str/lower-case (:summary entry))
@@ -91,13 +91,13 @@
            (let [inspector-extra (get extra [::inspector id])]
              (ui/vertical-layout
               (ui/horizontal-layout
-               (ui/label (str time " "))
-               (ant/button {:size :small :text "Inspect"
+               (eui/label (str time " "))
+               (eui/button {:size :small :text "Inspect"
                             :on-click #(vector [:com.phronemophobic.easel/add-applet
                                                 {:make-applet (fn [handler]
                                                                 (inspector/inspector-applet handler @obj))}])})
                (when (instance? Throwable @obj)
-                 (ant/button {:size :small :text "Stacktrace"
+                 (eui/button {:size :small :text "Stacktrace"
                               :on-click #(vector [:com.phronemophobic.easel/add-applet
                                                   {:make-applet (fn [handler]
                                                                   (exceptions/exception-applet handler @obj))}])})))

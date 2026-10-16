@@ -3,8 +3,8 @@
             [clojure.datafy :as datafy]
             [clojure.string :as str]
             [com.phronemophobic.easel.applet :as applet]
+            [com.phronemophobic.easel.ui :as eui]
             [com.phronemophobic.viscous :as viscous]
-            [com.phronemophobic.membrandt :as ant]
             [membrane.alpha.component.drag-and-drop :as dnd]
             [membrane.basic-components :as basic]
             [membrane.component :refer [defui defeffect]]
@@ -95,11 +95,11 @@
                      :on-click #(vector [::transform $state deref])}))
       (applet/button {:text "Copy preview" :size :small
                    :on-click #(vector [:clipboard-copy (preview obj)])}))
-     (ui/label (str (some-> obj class .getName) " | depth " (count parents)))
-     (ant/text-input {:text query :$text [$state '(keypath :query)] :size :small
+     (eui/label (str (some-> obj class .getName) " | depth " (count parents)))
+     (eui/field {:text query :$text [$state '(keypath :query)] :size :small
                       :placeholder "Filter page"})
-     (when-let [error (:error state)] (ui/label error))
-     (when error (ui/label error))
+     (when-let [error (:error state)] (eui/label error))
+     (when error (eui/label error))
      (basic/scrollview
       {:scroll-bounds [(max 0 (first size)) (max 0 (- (second size) 120))]
        :$body nil
@@ -113,7 +113,7 @@
                                   :on-click #(vector [::navigate $state k value])})
                      (ui/on :mouse-down
                             (fn [_] [[::dnd/drag-start {::dnd/obj {:x value}}]])
-                            (ui/label (preview v)))))))
+                            (eui/label (preview v)))))))
          (viscous/inspector {:obj (:obj state)
                              :width (max 1 (quot (first size) 8))
                              :height 10
@@ -121,7 +121,7 @@
      (ui/horizontal-layout
       (applet/button {:text "Previous" :size :small :disabled? (zero? offset)
                    :on-click #(vector [:set [$state '(keypath :offset)] (max 0 (- offset page-size))])})
-      (ui/label (str " " offset "–" (+ offset (count entries)) " "))
+      (eui/label (str " " offset "–" (+ offset (count entries)) " "))
       (applet/button {:text "Next" :size :small :disabled? (not more?)
                    :on-click #(when more? [[:set [$state '(keypath :offset)] (+ offset page-size)]])}))))))
 
