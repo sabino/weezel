@@ -23,7 +23,10 @@
 (defn recent [kind]
   (into [] (filter #(= kind (:kind %))) (:events @history)))
 
-(defn subscribe! [kind callback]
+(defn subscribe!
+  "Deliver the bounded history of kind now and whenever events change.
+  Return an idempotent unsubscribe function. A failing callback is detached."
+  [kind callback]
   (let [key (random-uuid)
         active? (atom true)
         notify (fn []

@@ -47,6 +47,9 @@
         (catch Throwable e (failure e))))))
 
 (defn task!
+  "Run f off the UI thread and merge its result into $state.
+  A newer request, removal, or retry supersedes an older result. With on-success,
+  deliver the current result to that callback instead of merging it."
   ([dispatch! $state f] (task! dispatch! $state f nil))
   ([dispatch! $state f on-success]
    (let [request (random-uuid)
@@ -107,6 +110,13 @@
     (assoc this :size size)))
 
 (defn tool-applet
+  "Build an applet around a view var and a state map.
+  The view receives :state, :$state, :size, :context, and :$context.
+  Optional on-start receives $state and may return a cleanup function."
+  {:easel/examples ["(require '[membrane.ui :as ui])\n(defn hello-view [{:keys [state]}] (ui/label (:message state)))\n(:state (tool-applet \"Hello\" #'hello-view {:message \"Hello, Clojure\"}))"]
+   :easel/see-also [com.phronemophobic.easel.model/IApplet
+                    com.phronemophobic.easel.model/IUI
+                    com.phronemophobic.easel.model/IResizable :applets :lifecycle]}
   ([label view state]
    (tool-applet label view state nil))
   ([label view state on-start]

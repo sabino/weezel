@@ -131,6 +131,39 @@
 (defeffect ::get-applets []
   (dispatch! :get (specter/path :easel :applets)))
 
+(defn subscribe-applets!
+  "Observe (project easel), immediately and when its value changes.
+  Return an idempotent cleanup function. Projections should exclude the
+  observer's changing state; callbacks may dispatch updates to that state."
+  [project callback]
+  (let [key (random-uuid)
+        active? (atom true)
+        previous (volatile! (Object.))
+        pending (java.util.concurrent.atomic.AtomicInteger. 0)
+        stop #(do (reset! active? false) (remove-watch app-state key))
+        notify (fn []
+                 ;; One drain per observer, without holding a lock across dispatch.
+                 ;; Reentrant and concurrent notifications coalesce to current state.
+                 (when (zero? (.getAndIncrement pending))
+                   (loop [processed 1]
+                     (when @active?
+                       (try
+                         (let [value (project (:easel @app-state))]
+                           (when (not= value @previous)
+                             (vreset! previous value)
+                             (callback value)))
+                         (catch Throwable e
+                           (stop)
+                           (events/report! e))))
+                     (let [remaining (.addAndGet pending (- processed))]
+                       (when (pos? remaining) (recur remaining))))))]
+    (add-watch app-state key (fn [_ _ _ _] (notify)))
+    (notify)
+    stop))
+
+(defeffect ::subscribe-applets [project callback]
+  (subscribe-applets! project callback))
+
 (defeffect ::get-root-pane []
   (dispatch! :get (specter/path :easel :root-pane)))
 
@@ -194,7 +227,10 @@
     (assoc this
            :size size)))
 
-(defn add-component-as-applet [component-var initial-state]
+(defn add-component-as-applet
+  "Open a Membrane defui var as an applet, with writable paths for its arguments.
+  Redefining the var updates its view without replacing the applet's state."
+  [component-var initial-state]
   (handler :com.phronemophobic.easel/add-applet
            {:make-applet
             (fn [_]
@@ -934,7 +970,9 @@
                    easel)
                  easel))))
 
-(defn make-easel []
+(defn make-easel
+  "Return an empty Easel value with a root pane and workspace collection."
+  []
   (-> (map->AEasel
        {:applets (tiara/ordered-map)
         :last-id 0
@@ -1190,7 +1228,12 @@
         :body
         (model/-ui easel $context context)})))))
 
-(defn run []
+(defn run
+  "Open the native Easel window, retaining existing applets when already initialized.
+  From a REPL: (require '[com.phronemophobic.easel :as easel]), then (easel/run)."
+  {:easel/see-also [com.phronemophobic.easel/make-easel
+                    com.phronemophobic.easel/add-component-as-applet :start]}
+  []
   (let [
         _ (swap! app-state
                  (fn [state]

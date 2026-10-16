@@ -39,7 +39,11 @@
        (close []
          (locking buffer (flush-line)))))))
 
-(defn evaluate [source {:keys [ns file line] :or {line 1}}]
+(defn evaluate
+  "Evaluate source in a Namespace, retaining nil and false results under :value.
+  Options :file and :line locate compiler errors. Output goes to Logs; failures
+  go to Exceptions and are returned under :exception."
+  [source {:keys [ns file line] :or {line 1}}]
   (let [out (log-writer *out* :info)
         err (log-writer *err* :error)]
     (try

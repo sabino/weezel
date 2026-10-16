@@ -125,5 +125,7 @@
       (applet/button {:text "Next" :size :small :disabled? (not more?)
                    :on-click #(when more? [[:set [$state '(keypath :offset)] (+ offset page-size)]])}))))))
 
-(defn inspector-applet [_handler obj]
+(defn inspector-applet
+  "Inspect a value through bounded pages, metadata, datafy, and navigation."
+  [_handler obj]
   (applet/tool-applet "Data Inspector" #'inspector-view (initial-state obj)))
