@@ -5,6 +5,7 @@
             [com.phronemophobic.easel.packages :as packages]
             [com.phronemophobic.easel.settings :as settings]
             [com.phronemophobic.easel.theme :as theme]
+            [com.phronemophobic.easel.composition :as composition]
             [com.phronemophobic.easel.ui :as eui]
             [membrane.basic-components :as basic]
             [membrane.component :refer [defui defeffect]]
@@ -35,6 +36,8 @@
                 (handler :com.phronemophobic.easel/add-applet
                          {:make-applet #(packages/make-applet % (:id p) nil)}))
     :theme (packages/select-theme! handler (:id p) true)
+    :composition (packages/select-composition! handler (:id p) true)
+    :keymap (packages/select-keymap! handler (:id p) true)
     :workspace (let [id (inc (get-in (handler :get :easel) [:workspaces :last-id] 0))]
                  (handler :update :easel #(-> % (assoc-in [:workspaces :by-id id]
                                                         {:id id :name (:name p) :preset (:id p)})
@@ -73,7 +76,7 @@
                  (dispatch! :update $state dissoc :preview-original))
       :revert (do (when-let [original (:preview-original state)] (packages/select-theme! dispatch! original))
                   (dispatch! :update $state dissoc :preview-original))
-      :edit (packages/edit-theme! dispatch! id)
+      :edit (packages/edit-data! dispatch! id)
       :install (applet/task! dispatch! $state #(packages/install! registry [id])
                             (fn [result]
                               (dispatch! :update $state assoc :registry (packages/catalog)
@@ -86,6 +89,10 @@
                                (dispatch! :com.phronemophobic.easel/close-applet (:id a)))
                              (when (= id (:id (theme/current)))
                                (packages/select-theme! dispatch! :easel/studio-light true))
+                             (when (= id (get-in (dispatch! :get :easel) [:composition :id]))
+                               (packages/select-composition! dispatch! :easel/minimal true))
+                             (when (= id (get-in (dispatch! :get :easel) [:keymap :id]))
+                               (packages/select-keymap! dispatch! :easel/default-keys true))
                              (dispatch! :update $state assoc :registry (packages/catalog)
                                         :message (if (:restart? result) "Removed. Loaded JVM code is released on restart." "Removed.")))))
      (catch Throwable e
@@ -201,10 +208,12 @@
                   (eui/row nil [(eui/button {:text "Edit EDN" :variant :link :on-click (action :edit)})
                                 (when (:preview-original state)
                                   (eui/button {:text "Revert preview" :variant :link :on-click (action :revert)}))]))
-                 (eui/button {:text (cond (:restart? p) "Restart JVM" installed? (if (= :workspace (:kind p)) "Use workspace" "Open") :else "Install")
+                 (eui/button {:text (cond (:restart? p) "Restart JVM" installed? (case (:kind p) :workspace "Use workspace" :composition "Use composition" :keymap "Use keymap" "Open") :else "Install")
                               :width 142 :height 40 :variant :primary
                               :disabled? (or busy? (:restart? p) (= :library (:kind p)) (and installed? (= :toolset (:kind p))))
                               :on-click (action (if installed? :open :install))}))
+               (when (and installed? (#{:composition :keymap} (:kind p)))
+                 (ui/padding 0 12 (eui/button {:text "Edit EDN" :variant :link :on-click (action :edit)})))
                (when (and (= :applet (:kind p)) (not installed?))
                  (ui/on :mouse-down (fn [_] [[:update [$state '(keypath :open?)] not]])
                    (ui/padding 0 16 (eui/text {:text (str (if (:open? state) "☑" "☐") "  Open in workspace")}))))
@@ -236,7 +245,7 @@
                        (for [toolset toolsets]
                          (eui/button {:text (:name toolset) :variant :text
                                       :on-click #(vector [::add-to-toolset $state (:id toolset) (:id p)])})))
-                     (eui/text {:text "Create a toolset from the sidebar first." :width w :size 12 :color :color/secondary}))))
+                     (eui/text {:text "Choose Toolsets, then New toolset to create a collection." :width w :size 12 :color :color/secondary}))))
                (when (and installed? (not (:bundled? p)))
                  (ui/padding 0 12 (eui/button {:text "Remove" :variant :link :disabled? busy? :on-click (action :remove)})))
                (ui/spacer 0 20) (eui/rule context w) (ui/spacer 0 18)
@@ -264,6 +273,12 @@
                (eui/row w [(eui/text {:text "Tools" :size 28 :weight :semi-bold})
                             (ui/spacer (max 0 (- w 200)) 0)
                             (eui/button {:text "Close" :variant :link :on-click #(vector [::close $state])})])
+               (when-not (composition/provides? (:composition/frames context) :easel/tools-navigation)
+                 (eui/wrap-row w
+                   (for [[id label] [[:discover "Discover"] [:installed "Installed"] [:toolsets "Toolsets"]
+                                     [:updates "Updates"] [:sources "Sources"]]]
+                     (eui/button {:text label :variant :text :selected? (= id (:page state :discover))
+                                  :on-click #(vector [::page id])}))))
                (ui/spacer 0 4)
                (eui/text {:text "Small tools. Shared data." :size 16 :color :color/secondary})
                (ui/spacer 0 20)
@@ -272,7 +287,7 @@
                (ui/spacer 0 12)
                (eui/wrap-row w
                  (for [[id name] [[:all "All"] [:clojars "Clojars"] [:git "Git"] [:local "Local"]
-                                  [:applet "Applets"] [:library "Libraries"] [:theme "Themes"] [:workspace "Workspaces"]]]
+                                  [:applet "Applets"] [:library "Libraries"] [:theme "Themes"] [:workspace "Workspaces"] [:composition "Compositions"] [:keymap "Keymaps"]]]
                    (eui/button {:text name :variant :text :size :small
                                 :selected? (or (= id (:source-filter state)) (= id (:kind state)))
                                 :on-click #(vector [:update $state assoc (if (#{:all :clojars :git :local} id) :source-filter :kind) id])})))
@@ -294,7 +309,7 @@
                  (ui/vertical-layout
                   (eui/text {:text "Install from EDN" :size 18 :weight :semi-bold})
                   (ui/spacer 0 12)
-                  (eui/text {:text "Enter a local manifest, an HTTPS URL, or a Git source with :git/url, :git/sha, and :path. Theme and workspace EDN files work directly."
+                  (eui/text {:text "Enter a local manifest, an HTTPS URL, or a Git source with :git/url, :git/sha, and :path. Theme, composition, keymap, and workspace EDN files work directly."
                               :width w :color :color/secondary})
                   (ui/spacer 0 12)
                   (eui/field {:text (:source-input state "") :$text [$state '(keypath :source-input)]
@@ -302,6 +317,8 @@
                   (ui/spacer 0 12)
                   (eui/button {:text "Install" :variant :primary :disabled? (:busy? state) :on-click #(vector [::import $state])})
                   (ui/spacer 0 24)))
+               (when (= :toolsets (:page state))
+                 (eui/button {:text "New toolset" :icon "plus" :on-click #(vector [::new-toolset])}))
                (when (:create? state)
                  (ui/vertical-layout
                   (eui/field {:text (:toolset-name state "") :$text [$state '(keypath :toolset-name)] :width w :placeholder "Toolset name"})

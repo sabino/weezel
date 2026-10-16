@@ -1,0 +1,33 @@
+{:composition/version 1
+ :id :easel/minimal
+ :name "Minimal"
+ :keymap :easel/default-keys
+ :commands [com.phronemophobic.easel/package-commands]
+ :panes {:header {:view com.phronemophobic.easel/pane-header :height :metric/pane-header}
+         :actions [:easel/split-right :easel/split-below :easel/balance-panes :easel/resize-panes
+                   :easel/hide-pane :easel/close-other-panes :easel/close-applet
+                   :easel/add-applet :easel/commands :easel/tools :easel/compositions :easel/keymaps :easel/help]}
+ :dock {:header-height 40
+        :items [{:id :repl :label "REPL" :tool :easel/repl :workspace-ns? true}
+                {:id :values :label "Values" :entry com.phronemophobic.easel.tap-watcher/tap-watcher-applet}
+                {:id :trace :label "Trace" :tool :easel/flowstorm}
+                {:id :logs :label "Logs" :tool :easel/logs}
+                {:id :terminal :label "Terminal" :tool :easel/terminal}
+                {:id :media :label "Media" :tool :easel/media}]}
+ :root
+ {:id :root :layout :stack
+  :children
+  [{:id :content :layout :column :gap :metric/gap
+    :children
+    [{:id :workspace :role :workspace :layout :stack
+      :children [{:id :panes :view com.phronemophobic.easel.shell/panes-view
+                  :when com.phronemophobic.easel.composition/workspace-visible?}
+                 {:id :help :view com.phronemophobic.easel.shell/help-view
+                  :when com.phronemophobic.easel.composition/help-visible?}
+                 {:id :manager :view com.phronemophobic.easel.shell/manager-view
+                  :when com.phronemophobic.easel.composition/manager-visible?}]}
+     {:id :dock :role :dock :view com.phronemophobic.easel.shell/dock
+      :height :metric/dock :max-height-ratio 0.35
+      :when com.phronemophobic.easel.composition/dock-visible?}]}
+   {:id :commands :view com.phronemophobic.easel.shell/commands-overlay
+    :when com.phronemophobic.easel.composition/commands-visible?}]}}

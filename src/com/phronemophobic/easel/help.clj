@@ -1,45 +1,38 @@
 (ns com.phronemophobic.easel.help
-  (:require [com.phronemophobic.easel.ui :as eui]
+  (:require [com.phronemophobic.easel.keymap :as keymap]
+            [com.phronemophobic.easel.commands :as commands]
+            [com.phronemophobic.easel.ui :as eui]
             [membrane.basic-components :as basic]
             [membrane.component :refer [defui]]
             [membrane.ui :as ui]))
 
-(def version 1)
+(def version 2)
 
-(def pages [[:start "Start here"] [:emacs "Emacs basics"] [:shortcuts "Shortcuts"]])
+(def pages [[:start "Start here"] [:emacs "Keys and concepts"] [:shortcuts "Shortcuts"]])
 
-(defn command-key []
-  (if (.startsWith (System/getProperty "os.name") "Mac") "⌘" "Ctrl+"))
-
-(defn shortcut-groups []
-  [{:title "Anywhere in Easel"
-    :rows [[(str (command-key) "K") "Find a tool or command. Type to filter; use ↑ / ↓ and Enter."]
-           [(str (command-key) "J") "Show or hide the bottom dock."]
-           ["F1" "Open this help."]
-           ["Esc / C-g" "Dismiss command search, help, a pane menu, or pane resizing."]]}
-   {:title "In a Clobber editor"
-    :rows [["C-x C-f" "Open a file. Choose a file in the prompt and press Enter."]
-           ["C-x C-s" "Save the buffer. A new buffer asks for a file name."]
-           ["C-x C-e" "Evaluate the form immediately before the cursor."]
-           ["C-M-x" "Evaluate the surrounding top-level form."]
-           ["C-c C-k" "Evaluate the whole Clojure buffer."]
-           ["C-s / C-r" "Search forward / backward."]
-           ["C-g" "Cancel an editor command or selection."]
-           ["C-_" "Undo the last edit."]]}
-   {:title "Move and select in an editor"
-    :rows [["← ↑ ↓ →" "Move the cursor. Mouse clicks work too."]
-           ["C-a / C-e" "Move to the start / end of the line."]
-           ["M-b / M-f" "Move backward / forward one word."]
-           ["C-SPC" "Set the selection's starting point, then move the cursor."]
-           ["C-w / M-w" "Cut / copy the selected region into the editor's kill ring."]
-           ["C-y" "Paste (yank) from the kill ring."]]}
-   {:title "Arrange editor panes"
-    :rows [["C-x 3" "Split the editor pane side by side."]
-           ["C-x o" "Focus the next editor pane."]
-           ["C-x b" "Choose an open editor buffer."]
-           ["C-x 0" "Hide this pane; the applet stays open."]
-           ["C-x 1" "Hide the other panes."]
-           ["C-x k" "Close this applet."]]}])
+(defn shortcut-groups
+  ([] (shortcut-groups {}))
+  ([easel]
+   (let [descriptor (keymap/current easel)
+         names (into {} (map (fn [[id value]] [id (:name value)])) @commands/builtin)
+         editor-actions {"split-pane" "Split the editor pane side by side."
+                         "delete-pane" "Close this applet." "show-select-buffer" "Choose an open buffer."
+                         "focus-next" "Focus the next pane." "close-other-panes" "Hide other panes."
+                         "hide-pane" "Hide this pane; keep its applet running."
+                         "eval-last" "Evaluate the form before the cursor." "eval-top" "Evaluate the surrounding top-level form."
+                         "eval-buffer" "Evaluate the Clojure buffer."}]
+     (vec (concat
+           (for [[scope title] [[:global "Across Easel"] [:workspace "In the workspace, outside text input"]]]
+             {:title title :rows (vec (for [[keys id] (sort-by key (get-in descriptor [:scopes scope])) :when id]
+                                       [keys (get names id (str id))]))})
+           [{:title "Editing text with Clobber"
+             :rows [["C-x C-f / C-x C-s" "Open / save a file."] ["C-s / C-r" "Search forward / backward."]
+                    ["C-a / C-e" "Start / end of line."] ["C-k" "Cut to the end of the line. M-x opens Easel commands from the editor."]
+                    ["C-SPC" "Set a mark, then move to select text."] ["C-w / M-w / C-y" "Cut / copy / yank from the kill ring."]
+                    ["C-g / C-_" "Cancel an editor command / undo."]]}
+            {:title "Pane and evaluation bindings from this keymap"
+             :rows (vec (for [scope [:editor :clojure] [keys intent] (sort-by key (get-in descriptor [:scopes scope])) :when intent]
+                          [keys (get editor-actions (name intent) (str intent))]))}])))))
 
 (defui paragraph [{:keys [text width]}]
   (ui/padding 0 5 (eui/text {:text text :width width :color :color/secondary})))
@@ -53,7 +46,7 @@
      (ui/spacer 0 18)
      (eui/text {:text "Everything here is also clickable" :weight :semi-bold :width width})
      (paragraph {:width width :text "Use Add applet or command search to open a tool. Tools manages packages, toolsets, and themes. Each pane's ⋯ menu contains its layout and close actions."})
-     (paragraph {:width width :text "The dock holds the REPL, values, logs, and terminal. Its tools start only when you choose them. Saved workspaces are available in the sidebar; examples are optional presets in Tools."})
+     (paragraph {:width width :text "The dock holds the REPL, values, logs, and terminal. Its tools start only when you choose them. Find saved workspaces in command search or Tools. Examples are optional presets."})
      (ui/spacer 0 18)
      (eui/text {:text "Try a short feedback loop" :weight :semi-bold :width width})
      (paragraph {:width width :text "Open a Clojure buffer, type (+ 1 2), and place the cursor after the closing parenthesis. Press Control+x, then Control+e. The result is 3. Change the form and evaluate it again."})
@@ -67,8 +60,16 @@
         (eui/button {:text "Tools and themes" :icon "appstore"
                      :on-click #(vector [:com.phronemophobic.easel/finish-help]
                                         [:com.phronemophobic.easel/open-tools])})])
+     (ui/spacer 0 18)
+     (eui/text {:text "Compose the environment" :weight :semi-bold :width width})
+     (paragraph {:width width :text "Minimal keeps the workspace free of sidebars and status bars. Studio adds them as an optional composition. Compositions describe views and layout in EDN; themes describe appearance; keymaps describe scoped commands. Switching them keeps your applets running."})
+     (eui/wrap-row width
+       [(eui/button {:text "Choose a composition" :on-click #(vector [:com.phronemophobic.easel/finish-help]
+                                                                     [:com.phronemophobic.easel/manage-packages :composition])})
+        (eui/button {:text "Choose a keymap" :on-click #(vector [:com.phronemophobic.easel/finish-help]
+                                                                [:com.phronemophobic.easel/manage-packages :keymap])})])
      (ui/spacer 0 20)
-     (paragraph {:width width :text "You can return to this guide at any time with Help or F1. Emacs basics explains the notation before you need to memorize anything."}))
+     (paragraph {:width width :text "Return to this guide with F1 or the pane menu. Keys and concepts explains the notation; Shortcuts shows the selected keymap."}))
 
     :emacs
     (ui/vertical-layout
@@ -86,7 +87,7 @@
      (paragraph {:width width :text "Point is the cursor. Mark is the other end of a selection: C-SPC sets it, then moving the cursor selects a region. Kill means cut, and yank means paste. The kill ring holds text cut or copied by the editor; C-y pastes from it."})
      (ui/spacer 0 14)
      (eui/text {:text "Commands and the live REPL" :weight :semi-bold :width width})
-     (paragraph {:width width :text (str "In Easel, use command search (" (command-key) "K) to find tools and workspace actions by name. Clojure buffers evaluate forms in the running process. The REPL is another way to evaluate a form: type it into the input and press Enter.")})
+     (paragraph {:width width :text "With the default keymap, M-x finds tools and workspace actions by name. C-k also opens commands when no text input is focused. Inside Clobber, C-k cuts to the end of the line. Shortcuts shows your selected keymap. Clojure buffers and the REPL evaluate in the running process."})
      (paragraph {:width width :text "Start with ordinary typing, arrow keys, and your mouse. Then learn one command at a time: open, save, evaluate, and cancel are enough to begin."}))))
 
 (defui shortcut-group [{:keys [title rows width]}]
@@ -108,7 +109,7 @@
               (eui/text {:text description :width (max 1 (- width key-width)) :color :color/secondary}))))))
      (ui/spacer 0 20))))
 
-(defui help-view [{:keys [help width height]}]
+(defui help-view [{:keys [help easel width height]}]
   (let [padding (min 36 (* width 0.06))
         content-width (max 1 (min 820 (- width (* 2 padding))))
         page (:page help :start)
@@ -131,7 +132,7 @@
         body-height (max 0 (- height header-height footer-height))
         content (if (= page :shortcuts)
                   (apply ui/vertical-layout
-                    (for [group (shortcut-groups)]
+                    (for [group (shortcut-groups easel)]
                       (shortcut-group (assoc group :width content-width))))
                   (introduction-page {:page page :width content-width}))]
     (ui/fixed-bounds [width height]

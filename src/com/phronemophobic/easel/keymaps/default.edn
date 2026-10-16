@@ -1,0 +1,19 @@
+{:keymap/version 1
+ :id :easel/default-keys
+ :name "Easel"
+ :scopes
+ {:global {"M-x" :easel/commands
+           "F1" :easel/help
+           "ESC" :easel/cancel
+           "C-g" :easel/cancel}
+  :workspace {"C-k" :easel/commands
+              "C-j" :easel/toggle-dock}
+  :editor {"C-x 3" :com.phronemophobic.easel.clobber/split-pane
+           "C-x k" :com.phronemophobic.easel.clobber/delete-pane
+           "C-x b" :com.phronemophobic.easel.clobber/show-select-buffer
+           "C-x o" :com.phronemophobic.easel.clobber/focus-next
+           "C-x 1" :com.phronemophobic.easel.clobber/close-other-panes
+           "C-x 0" :com.phronemophobic.easel.clobber/hide-pane}
+  :clojure {"C-x C-e" :com.phronemophobic.easel.clobber/eval-last
+            "C-M-x" :com.phronemophobic.easel.clobber/eval-top
+            "C-c C-k" :com.phronemophobic.easel.clobber/eval-buffer}}}

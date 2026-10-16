@@ -103,7 +103,7 @@
                   (merge (:layout (workspace/builtin :easel/sketchbook))
                          {:width (:content-width g) :height (:workspace-height g)}) 8)
           leaves (splitpane/flatten-pane layout)]
-      (is (every? #(not (neg? %)) (vals g)))
+      (is (every? #(not (neg? %)) (filter number? (vals g))))
       (is (every? #(and (<= 0 (:x %) (:content-width g))
                         (<= 0 (:y %) (:workspace-height g))
                         (<= (+ (:x %) (:width %)) (:content-width g))
@@ -125,10 +125,11 @@
           (is (= [1536 1024] (ui/bounds ((component/make-app #'easel/easel-view easel/app-state easel/handler)))))
           (let [app (component/make-app #'easel/easel-view easel/app-state easel/handler)
                 focus (get-in @easel/app-state [:membrane.component/context :focus])]
-            (ui/key-event (app) 75 0 :press ui/SUPER-MASK)
+            (ui/key-event (app) 88 0 :press ui/ALT-MASK)
+            (ui/key-event (app) 88 0 :release ui/ALT-MASK)
             (ui/key-press (app) "Documentation")
             (is (= "Documentation" (get-in @easel/app-state [:easel :commands :query])))
-            (ui/key-press (app) :escape)
+            (ui/key-event (app) 256 0 :press 0)
             (is (= focus (get-in @easel/app-state [:membrane.component/context :focus]))))
           (easel/handler ::easel/open-workspace 2)
           (is (await-value #(not @easel/queue-scheduled?)))

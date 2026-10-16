@@ -1,26 +1,31 @@
 (ns com.phronemophobic.easel.shell
   (:require [clojure.string :as str]
             [com.phronemophobic.easel.theme :as theme]
+            [com.phronemophobic.easel.composition :as composition]
+            [com.phronemophobic.easel.keymap :as keymap]
             [com.phronemophobic.easel.help :as help]
             [com.phronemophobic.easel.ui :as eui]
             [membrane.basic-components :as basic]
             [membrane.component :refer [defui]]
             [membrane.ui :as ui]))
 
-(defn geometry [size appearance dock?]
-  (let [[width height] size
-        width (max 0 width) height (max 0 height)
-        context {::theme/value appearance}
-        sidebar (if (< width 650) 0 (min (* width 0.25) (theme/token context :metric/sidebar)))
-        topbar (min height (theme/token context :metric/topbar))
-        status (min (max 0 (- height topbar)) (theme/token context :metric/status))
-        available (max 0 (- height topbar status))
-        dock (if dock? (min (theme/token context :metric/dock) (* available 0.35)) 0)
-        gap (theme/token context :metric/gap)]
-    {:width width :height height :sidebar sidebar :topbar topbar :status status
-     :gap gap :content-width (max 0 (- width sidebar (* 2 gap)))
-     :workspace-height (max 0 (- available dock (* 2 gap)))
-     :dock-height dock :available available}))
+(defn geometry
+  ([size appearance dock?]
+   (geometry size appearance {:dock (when dock? {})} @composition/default-composition))
+  ([size appearance easel descriptor]
+   (let [frames (composition/layout descriptor size {:easel easel :appearance appearance})
+         workspace (composition/region frames :workspace)
+         dock (composition/region frames :dock)
+         sidebar (composition/region frames :sidebar)
+         topbar (composition/region frames :topbar)
+         status (composition/region frames :status)]
+     {:width (max 0 (first size)) :height (max 0 (second size)) :frames frames
+      :sidebar (:width sidebar 0) :topbar (:height topbar 0) :status (:height status 0)
+      :gap (theme/token {::theme/value appearance} :metric/gap)
+      :content-x (:x workspace 0) :content-y (:y workspace 0)
+      :content-width (:width workspace 0) :workspace-height (:height workspace 0)
+      :dock-height (:height dock 0) :dock-width (:width dock 0)
+      :available (:height workspace 0)})))
 
 (defui navigation-row [{:keys [text icon width selected? on-click]}]
   (eui/button {:text text :icon icon :width width :height 42 :variant :text
@@ -80,53 +85,38 @@
                                           :$body nil :body (if (:manager-id easel)
                                                              (tools-navigation {:easel easel :width width}) body)}))])))
 
-(defui topbar [{:keys [easel width height]}]
-  (let [workspaces (take (if (< width 1000) 1 3)
-                         (sort-by (comp str key) (get-in easel [:workspaces :by-id])))
-        tabs (ui/flex-layout
-              (for [[id workspace] workspaces]
-                (eui/button {:text (:name workspace) :variant :text
-                             :selected? (= id (:workspace-id easel)) :height 36
-                             :on-click #(vector [:com.phronemophobic.easel/open-workspace id])}))
-              {:gap 8})
-        name (eui/text {:text "Easel" :size 20 :weight :semi-bold})
-        tools (eui/button {:text "Tools" :height 36 :selected? (some? (:manager-id easel))
-                           :on-click #(vector [:com.phronemophobic.easel/open-tools])})
-        help (eui/button {:text "Help" :height 36 :selected? (some? (:help easel))
-                          :on-click #(vector [:com.phronemophobic.easel/show-help])})
-        status (eui/row nil [(eui/text {:text "●" :color :color/live :size 11})
-                            (eui/text {:text "Local JVM" :size 12})])
-        tools-x (max 0 (- width (ui/width tools) 16))
-        help-x (max 0 (- tools-x (ui/width help) 8))
-        status-x (- help-x (ui/width status) 24)
-        search-right (- (if (> width 1100) status-x help-x) 20)
-        search-width (max 0 (min 400 (- search-right (+ 134 (ui/width tabs)))))
-        search (eui/button {:text (str "Find a tool or command     " (help/command-key) "K") :width search-width :height 36
-                            :icon "search" :variant :default
-                            :on-click #(vector [:com.phronemophobic.easel/show-commands ""])})]
-    (ui/fixed-bounds [width height]
-      [(eui/surface context width height :color/header)
-       (ui/translate 20 (/ (- height (ui/height name)) 2) name)
-       (when (> width 520)
-         (ui/translate 110 (/ (- height 36) 2)
-           (ui/scissor-view [0 0] [(max 0 (- help-x 126)) 36] tabs)))
-       (when (and (> width 850) (>= search-width 250))
-         (ui/translate (- search-right search-width) (/ (- height 36) 2) search))
-       (when (> width 1100) (ui/translate status-x (/ (- height (ui/height status)) 2) status))
-       (ui/translate help-x (/ (- height 36) 2) help)
-       (ui/translate tools-x (/ (- height 36) 2) tools)
-       (ui/translate 0 (max 0 (dec height)) (eui/rule context width))])))
+(defui brand [{:keys [width height]}]
+  (let [label (eui/text {:text "Easel" :size 20 :weight :semi-bold})]
+    (ui/translate 12 (max 0 (/ (- height (ui/height label)) 2)) label)))
 
-(def dock-items [[:repl "REPL"] [:values "Values"] [:trace "Trace"] [:logs "Logs"] [:terminal "Terminal"] [:media "Media"]])
+(defui workspace-tabs [{:keys [easel width height]}]
+  (ui/scissor-view [0 0] [width height]
+    (eui/row nil
+      (for [[id workspace] (sort-by (comp str key) (get-in easel [:workspaces :by-id]))]
+        (eui/button {:text (:name workspace) :variant :text :height height
+                     :selected? (= id (:workspace-id easel))
+                     :on-click #(vector [:com.phronemophobic.easel/open-workspace id])})))))
 
-(defui dock [{:keys [easel width height body]}]
+(defui command-button [{:keys [easel width height command text icon show-shortcut?]}]
+  (eui/button {:text (str text (when show-shortcut? (str "     " (keymap/shortcut (keymap/current easel) command))))
+               :icon icon :width width :height height :variant :text
+               :on-click #(vector [:com.phronemophobic.easel/invoke-command command nil])}))
+
+(defui session-indicator [{:keys [height]}]
+  (let [label (eui/row nil [(eui/text {:text "●" :color :color/live :size 11})
+                           (eui/text {:text "Local JVM" :size 12})])]
+    (ui/translate 0 (max 0 (/ (- height (ui/height label)) 2)) label)))
+
+(defn dock-items [easel] (get-in (composition/current easel) [:dock :items]))
+
+(defui dock [{:keys [easel width height dock-body]}]
   (let [tabs (ui/flex-layout
-              (for [[id label] dock-items]
+              (for [{:keys [id label]} (dock-items easel)]
                 (eui/button {:text label :variant :text :height 30 :size :small
                              :selected? (= id (get-in easel [:dock :selected]))
                              :on-click #(vector [:com.phronemophobic.easel/select-dock id])}))
               {:gap 6})
-        header-height 40]
+        header-height (min height (composition/dimension (theme/current context) (get-in (composition/current easel) [:dock :header-height] 40)))]
     (ui/fixed-bounds [width height]
       [(eui/surface context width height)
        (ui/translate 10 5 tabs)
@@ -135,7 +125,7 @@
                                   :on-click #(vector [:com.phronemophobic.easel/toggle-dock])}))
        (ui/translate 0 (dec header-height) (eui/rule context width))
        (ui/translate 0 header-height
-         (ui/scissor-view [0 0] [width (max 0 (- height header-height))] body))
+         (ui/scissor-view [0 0] [width (max 0 (- height header-height))] dock-body))
        (eui/border context width height)])))
 
 (defui statusbar [{:keys [width height easel]}]
@@ -151,7 +141,8 @@
      (when (> width 800)
        (ui/translate (- width 340) 4
          (eui/text {:text (or (when (:theme-error easel) "Theme error · previous theme retained")
-                             (:message easel) (str (help/command-key) "K Commands    F1 Help    " (help/command-key) "J Dock"))
+                             (:message easel) (str (keymap/shortcut (keymap/current easel) :easel/commands) " Commands    "
+                                                  (keymap/shortcut (keymap/current easel) :easel/help) " Help"))
                     :width 330 :size 11 :color :color/secondary})))]))
 
 (defui command-palette [{:keys [commands query selection width]}]
@@ -170,7 +161,7 @@
                   (apply ui/vertical-layout
                          (for [[i command] (map-indexed vector matches)]
                            (eui/button {:text (:name command) :icon (:icon command) :variant :text
-                                        :selected? (= i index)
+                                        :selected? (= i index) :disabled? (:disabled? command)
                                         :width (- panel-width 32) :height 40 :on-click #(:intents command)}))))
         panel-height (+ 32 (ui/height content))]
     (ui/fixed-bounds [panel-width panel-height]
@@ -178,36 +169,36 @@
        (eui/border context panel-width panel-height :color/border 8)
        (ui/translate 16 16 content)])))
 
+(defui panes-view [{:keys [body]}] body)
+(defui manager-view [{:keys [manager-body]}] manager-body)
+(defui help-view [{:keys [easel width height]}]
+  (help/help-view {:help (:help easel) :$help [$easel '(keypath :help)] :easel easel
+                   :width width :height height}))
+
+(defui commands-overlay [{:keys [easel commands width height]}]
+  [(ui/on :mouse-down (fn [_] [[:com.phronemophobic.easel/hide-commands]])
+          (ui/filled-rectangle [0 0 0 0.12] width height))
+   (ui/translate (max 0 (/ (- width (min 600 (max 200 (- width 40)))) 2)) (min 80 (* height 0.1))
+     (command-palette {:commands commands :query (get-in easel [:commands :query] "")
+                       :selection (get-in easel [:commands :selection] 0)
+                       :$selection [$easel '(keypath :commands) '(keypath :selection)]
+                       :$query [$easel '(keypath :commands) '(keypath :query)] :width width}))])
+
 (defui workspace-view [{:keys [easel body dock-body manager-body commands]}]
-  (let [appearance (theme/current context)
-        {:keys [width height sidebar topbar status gap content-width workspace-height dock-height available]}
-        (geometry (:viewport easel [1100 800]) appearance (and (:dock easel) (not (get-in easel [:dock :hidden?]))))
-        manager? (some? (:manager-id easel))
-        help? (some? (:help easel))
-        content-x (+ sidebar gap)
-        content-y (+ topbar gap)
-        command-state (:commands easel)]
+  (let [[width height :as size] (:viewport easel [1100 800])
+        frames (composition/layout (composition/current easel) size
+                                    {:easel easel :appearance (theme/current context)})
+        shared {:easel easel :$easel $easel :body body :dock-body dock-body :manager-body manager-body
+                :commands commands :context context :$context $context}]
     (ui/fixed-bounds [width height]
       [(eui/surface context width height :color/window)
-       (com.phronemophobic.easel.shell/topbar {:easel easel :width width :height topbar})
-       (when (pos? sidebar)
-         (ui/translate 0 topbar
-           (com.phronemophobic.easel.shell/sidebar {:easel easel :width sidebar :height available})))
-       (ui/translate content-x content-y
-         (ui/scissor-view [0 0] [content-width (if (or help? manager?) (max 0 (- available (* 2 gap))) workspace-height)]
-           (cond help? (help/help-view {:help (:help easel) :$help [$easel '(keypath :help)]
-                                      :width content-width :height (max 0 (- available (* 2 gap)))})
-                 manager? manager-body
-                 :else body)))
-       (when (and (not help?) (not manager?) (pos? dock-height))
-         (ui/translate content-x (+ content-y workspace-height gap)
-           (dock {:easel easel :width content-width :height (max 0 (- dock-height gap)) :body dock-body})))
-       (ui/translate sidebar (- height status)
-         (statusbar {:width (- width sidebar) :height status :easel easel}))
-       (when command-state
-         [(ui/on :mouse-down (fn [_] [[:com.phronemophobic.easel/hide-commands]])
-                  (ui/with-color [0 0 0 0.12] (ui/filled-rectangle [0 0 0 0.12] width height)))
-          (ui/translate (max 20 (/ (- width (min 600 (- width 40))) 2)) (+ topbar 24)
-            (command-palette {:commands commands :query (:query command-state "") :selection (:selection command-state 0)
-                               :$selection [$easel '(keypath :commands) '(keypath :selection)]
-                               :$query [$easel '(keypath :commands) '(keypath :query)] :width width}))])])))
+       (vec (for [{:keys [id node x y width height] :as frame} frames
+                  :when (and (pos? width) (pos? height) (or (:view node) (:background node)))]
+              (ui/translate x y
+                (ui/scissor-view [0 0] [width height]
+                  [(when-let [background (:background node)] (eui/surface context width height background))
+                   (when-let [view (:view node)]
+                     ((requiring-resolve view)
+                      (merge shared (:props node)
+                             {:width width :height height :frame frame :node node
+                              :extra (get extra id) :$extra [$extra (list 'keypath id)]})))]))))])))

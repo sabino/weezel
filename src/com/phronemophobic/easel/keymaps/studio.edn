@@ -1,0 +1,6 @@
+{:keymap/version 1
+ :id :easel/studio-keys
+ :name "Studio"
+ :extends :easel/default-keys
+ :scopes {:global {"S-k" :easel/commands
+                   "S-j" :easel/toggle-dock}}}

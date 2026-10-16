@@ -13,6 +13,9 @@
             [com.phronemophobic.easel.splitpane :as splitpane]
             [com.phronemophobic.easel.applet :as applet]
             [com.phronemophobic.easel.theme :as theme]
+            [com.phronemophobic.easel.composition :as composition]
+            [com.phronemophobic.easel.keymap :as keymap]
+            [com.phronemophobic.easel.commands :as command]
             [com.phronemophobic.easel.ui :as eui]
             [com.phronemophobic.easel.shell :as shell]
             [com.phronemophobic.easel.help :as help]
@@ -696,8 +699,10 @@
          :all-panes
          reverse))))
 
-(defui pane-header [{:keys [pane applet]}]
-  (let [w (:width pane) h (theme/token context :metric/pane-header)
+(declare command-environment commands)
+
+(defui pane-header [{:keys [pane applet height]}]
+  (let [w (:width pane) h (min (:height pane) (or height (theme/token context :metric/pane-header)))
         grip (ui/on :mouse-down
                     (fn [_] [[::dnd/drag-start {::dnd/obj {::pane pane}}]])
                     (eui/row nil [(eui/text {:text "⠿" :size 18 :color :color/muted})
@@ -726,22 +731,20 @@
                         (ui/scissor-view [0 0] [(- w 200) (ui/height ns-label)] ns-label)))
         (ui/translate 0 (dec h) (eui/rule context w))]))))
 
-(defui pane-actions [{:keys [pane-id applet-id width]}]
-  (let [actions [["Split right" [::split-direction {:pane-id pane-id :direction :row}]]
-                 ["Split below" [::split-direction {:pane-id pane-id :direction :column}]]
-                 ["Balance panes" [::balance-panes {:pane-id ::root-pane}]]
-                 ["Resize panes" [::toggle-pane-resize {:pane-id ::root-pane}]]
-                 ["Hide pane" [::hide-pane {:pane-id pane-id}]]
-                 ["Close other panes" [::close-other-panes {:pane-id pane-id}]]
-                 ["Close applet" [::close-applet applet-id]]]]
+(defui pane-actions [{:keys [easel pane-id applet-id width]}]
+  (let [environment (assoc (command-environment easel context) :pane-id pane-id :applet-id applet-id)
+        registry (command/registry (composition/current easel) environment)]
     (apply ui/vertical-layout
-     (for [[label intent] actions]
-       (eui/button {:text label :width width :height 34 :variant :text
-                    :disabled? (and (= label "Close applet") (nil? applet-id))
-                    :on-click #(vector [::pane-menu nil] intent)})))))
+      (for [id (get-in (composition/current easel) [:panes :actions])
+            :let [action (get registry id)] :when action]
+        (eui/button {:text (:name action) :width width :height 34 :variant :text
+                     :disabled? (not (command/enabled? action environment))
+                     :on-click #(vector [::invoke-command id pane-id])})))))
 
 (defn easel-ui* [{:keys [applets] :as easel} $extra extra $context context]
-  (let [header-height (theme/token context :metric/pane-header)
+  (let [descriptor (composition/current easel)
+        header-height (composition/dimension (theme/current context) (get-in descriptor [:panes :header :height] 0))
+        header-view (some-> (get-in descriptor [:panes :header :view]) requiring-resolve)
         panes (filter #(empty? (:panes %)) (-> easel ::cached-layout :all-panes))
         menu-pane (some #(when (= (:id %) (:pane-menu easel)) %) panes)]
     [(vec (for [pane panes
@@ -752,8 +755,9 @@
        (ui/translate (:x pane) (:y pane)
          (ui/fixed-bounds [w h]
            [(eui/surface context w h)
-            (pane-header {:pane pane :applet a :$applet [(:$ref a)] :extra pane-extra :$extra $pane-extra
-                          :context context :$context $context})
+            (when (and header-view (pos? header-height))
+              (header-view {:pane pane :applet a :$applet [(:$ref a)] :height header-height
+                            :extra pane-extra :$extra $pane-extra :context context :$context $context}))
             (ui/translate 0 header-height
               (ui/scissor-view [0 0] [w (max 0 (- h header-height))]
                 (if a
@@ -774,13 +778,16 @@
                      :$extra [$extra (list 'keypath ::pane-resizer)]
                      :context context :$context $context}))
      (when menu-pane
-       (let [w 200 x (max 0 (- (+ (:x menu-pane) (:width menu-pane)) w 8))
-             y (+ (:y menu-pane) header-height)]
+       (let [w (min 240 (first (:size easel)))
+             menu (pane-actions {:easel easel :pane-id (:id menu-pane) :applet-id (:applet-id menu-pane)
+                                 :width w :context context :$context $context})
+             h (min (second (:size easel)) (ui/height menu))
+             x (max 0 (- (+ (:x menu-pane) (:width menu-pane)) w 8))
+             y (max 0 (min (+ (:y menu-pane) header-height) (- (second (:size easel)) h)))]
          (ui/translate x y
-           [(eui/surface context w 238 :color/surface 4)
-            (pane-actions {:pane-id (:id menu-pane) :applet-id (:applet-id menu-pane) :width w
-                           :context context :$context $context})
-            (eui/border context w 238 :color/border 4)])))]))
+           [(eui/surface context w h :color/surface 4)
+            (basic/scrollview {:scroll-bounds [w h] :$body nil :body menu})
+            (eui/border context w h :color/border 4)])))]))
 
 (defn- create-applet [factory]
   (try
@@ -920,15 +927,16 @@
           root-pane (-> root-pane
                         (assoc :width (max 0 w)
                                :height (max 0 h)))
-          header-height (theme/token {::theme/value (:appearance this)} :metric/pane-header)
+          header-height (composition/dimension (:appearance this) (get-in (composition/current this) [:panes :header :height] 0))
           gap (theme/token {::theme/value (:appearance this)} :metric/gap)
           root-pane-layout (splitpane/layout-workspace root-pane gap)
           all-panes (splitpane/flatten-pane-nested root-pane-layout)
           dock-id (when-not (get-in this [:dock :hidden?])
                     (get-in this [:dock :applets (get-in this [:dock :selected])]))
-          dock-pane (when (get applets dock-id)
-                      {:applet-id dock-id :width (max 0 w)
-                       :height (max 0 (- (or (:dock-height this) 240) 48)) :body? true})
+          dock-pane (when (and (get applets dock-id) (pos? (:dock-height this 0)))
+                      {:applet-id dock-id :width (max 0 (:dock-width this w))
+                       :height (max 0 (- (:dock-height this 0)
+                                         (composition/dimension (:appearance this) (get-in (composition/current this) [:dock :header-height] 40)))) :body? true})
           manager-pane (when-let [id (:manager-id this)]
                          {:applet-id id :width (max 0 w)
                           :height (max 0 (or (:manager-height this) h)) :body? true})
@@ -1207,11 +1215,14 @@
 
 (defn resize-window [easel size content-scale]
   (let [appearance (or (:appearance easel) (theme/current))
-        geometry (shell/geometry size appearance (and (:dock easel) (not (get-in easel [:dock :hidden?]))))]
+        geometry (shell/geometry size appearance easel (composition/current easel))]
     (-> easel
-        (assoc :viewport size :appearance appearance :dock-height (:dock-height geometry)
-               :manager-height (- (:available geometry) (* 2 (:gap geometry))))
+        (assoc :viewport size :appearance appearance :composition/frames (:frames geometry)
+               :dock-height (:dock-height geometry) :dock-width (:dock-width geometry)
+               :manager-height (:workspace-height geometry))
         (model/-resize [(:content-width geometry) (:workspace-height geometry)] content-scale))))
+
+(defn refresh-window [easel] (resize-window easel (:viewport easel [1536 1024]) (:content-scale easel [1 1])))
 
 (defeffect ::dispatch-fn [f] (f))
 (defeffect ::pane-menu [id] (dispatch! :update :easel assoc :pane-menu id))
@@ -1230,7 +1241,8 @@
                #(-> % (dissoc :pane-menu)
                       (assoc :help
                              (merge {:previous-focus (dispatch! :get '[(keypath :membrane.component/context) (keypath :focus)])}
-                                    (:help easel) {:page :start :offset [0 0]}))))))
+                                    (:help easel) {:page :start :offset [0 0]}))))
+    (dispatch! :update :easel refresh-window)))
 
 (defeffect ::help-page [page]
   (when (some #(= page (first %)) help/pages)
@@ -1243,7 +1255,7 @@
            (catch Throwable e
              (events/report! e)
              (dispatch! :update :easel assoc :message (str "Could not save help preference: " (applet/error-message e))))))
-    (dispatch! :update :easel dissoc :help)
+    (dispatch! :update :easel #(refresh-window (dissoc % :help)))
     (dispatch! :set '[(keypath :membrane.component/context) (keypath :focus)] (:previous-focus state))))
 
 (defeffect ::new-editor []
@@ -1321,19 +1333,22 @@
 
 (defeffect ::select-dock [slot]
   (dispatch! ::finish-help)
-  (let [easel (dispatch! :get :easel)]
-    (when-not (get-in easel [:dock :applets slot])
-      (let [factory (case slot
-                      :repl #(apply (requiring-resolve 'com.phronemophobic.easel.repl/repl-applet) [% (or (:eval-ns easel) 'user)])
-                      :values #((requiring-resolve 'com.phronemophobic.easel.tap-watcher/tap-watcher-applet) %)
-                      :trace #((requiring-resolve 'com.phronemophobic.easel.flowstorm/flowstorm-applet) %)
-                      :logs #((requiring-resolve 'com.phronemophobic.easel.logging/logging-applet) %)
-                      :terminal #((requiring-resolve 'com.phronemophobic.easel.term/termlet) %)
-                      :media #((requiring-resolve 'com.phronemophobic.easel.media/media-applet) %))]
-        (dispatch! ::add-applet {:dock-slot slot :make-applet factory})))
-    (dispatch! :update :easel
-               #(let [easel (-> % (assoc-in [:dock :selected] slot) (assoc-in [:dock :hidden?] false))]
-                  (resize-window easel (:viewport easel) (:content-scale easel))))))
+  (let [easel (dispatch! :get :easel)
+        item (or (some #(when (= slot (:id %)) %) (shell/dock-items easel))
+                 (throw (ex-info "No dock tool is configured for this slot" {:slot slot})))
+        dock? (some #(= :dock (:role %)) (composition/nodes (composition/current easel)))
+        existing (get-in easel [:dock :applets slot])]
+    (when-not existing
+      (let [factory (fn [handler]
+                      (if-let [tool (:tool item)]
+                        ((requiring-resolve 'com.phronemophobic.easel.packages/make-applet)
+                         handler tool (if (:workspace-ns? item) [(or (:eval-ns easel) 'user)] (:args item)))
+                        (apply (requiring-resolve (:entry item)) handler (:args item))))]
+        (dispatch! ::add-applet {:make-applet factory :dock-slot slot})))
+    (if dock?
+      (dispatch! :update :easel
+                 #(refresh-window (-> % (assoc-in [:dock :selected] slot) (assoc-in [:dock :hidden?] false))))
+      (when-let [id (get-in (dispatch! :get :easel) [:dock :applets slot])] (dispatch! ::focus-applet id)))))
 
 (defeffect ::open-tools []
   (dispatch! ::finish-help)
@@ -1345,35 +1360,88 @@
                               :make-applet (requiring-resolve 'com.phronemophobic.easel.packages/package-applet)}))
     (dispatch! :update :easel #(resize-window % (:viewport %) (:content-scale %)))))
 (defeffect ::close-tools []
-  (dispatch! :update :easel dissoc :manager-id))
+  (dispatch! :update :easel #(refresh-window (dissoc % :manager-id))))
 
-(defn commands [easel]
+(defeffect ::manage-packages [kind]
+  (dispatch! ::open-tools)
+  (when-let [id (:manager-id (dispatch! :get :easel))]
+    (dispatch! :update [:easel :applets (list 'keypath id) :state]
+               assoc :kind kind :page :installed :query "" :selected nil)))
+
+(defn command-environment [easel context]
+  (let [panes (filter #(empty? (:panes %)) (get-in easel [::cached-layout :all-panes]))
+        pane (or (some #(when (= (:id %) (or (:pane-menu easel) (get-in easel [:commands :pane-id]))) %) panes)
+                 (some #(when (= (:applet-id %) (:focus context)) %) panes) (first panes))]
+    {:easel easel :context context :pane-id (:id pane) :applet-id (:applet-id pane)
+     :easel-path '(keypath :easel)}))
+
+(defn key-scopes [easel context]
+  (cond-> [:global]
+    (or (nil? (:focus context))
+        (and (or (uuid? (:focus context)) (integer? (:focus context)))
+             (not (contains? (:applets easel) (:focus context))))) (conj :workspace)
+    (get-in easel [:applets (:focus context) :package/id])
+    (conj (get-in easel [:applets (:focus context) :package/id]))))
+
+(defeffect ::open-package [id pane-id]
+  (dispatch! ::finish-help)
+  (dispatch! ::close-tools)
+  (dispatch! ::add-applet
+             {:pane-id pane-id
+              :make-applet #((requiring-resolve 'com.phronemophobic.easel.packages/make-applet) % id nil)}))
+
+(defeffect ::use-package [id]
+  (let [package (get ((requiring-resolve 'com.phronemophobic.easel.packages/catalog)) id)]
+    ((requiring-resolve 'com.phronemophobic.easel.package-ui/open-package!) dispatch! package)))
+
+(defn package-commands [{:keys [easel pane-id]}]
   (let [catalog ((requiring-resolve 'com.phronemophobic.easel.packages/catalog))
         installed? (requiring-resolve 'com.phronemophobic.easel.packages/installed?)]
     (concat
-     [{:name "Getting started and shortcuts" :icon "question-circle" :intents [[::hide-commands] [::show-help]]}
-      {:name "New blank editor" :icon "file-text" :intents [[::hide-commands] [::new-editor]]}
-      {:name "Open REPL" :icon "code" :intents [[::hide-commands] [::close-tools] [::select-dock :repl]]}
-      {:name "Tools and themes" :icon "appstore" :intents [[::hide-commands] [::open-tools]]}
-      {:name "Toggle dock" :icon "layout" :intents [[::hide-commands] [::toggle-dock]]}
-      {:name "Balance panes" :icon "border" :intents [[::hide-commands] [::balance-panes {:$easel '(keypath :easel) :pane-id ::root-pane}]]}]
      (for [p (sort-by :name (vals catalog)) :when (= :applet (:kind p))]
-       {:name (str (when-not (installed? p) "Install ") (:name p)) :icon (or (:icon p) "plus")
+       {:id (keyword (str "easel.open." (namespace (:id p))) (name (:id p)))
+        :name (str (when-not (installed? p) "Install ") (:name p)) :icon (or (:icon p) "plus")
         :intents (if (installed? p)
-                   [[::hide-commands] [::finish-help] [::close-tools]
-                    [::add-applet {:pane-id (get-in easel [:commands :pane-id])
-                                   :make-applet #((requiring-resolve 'com.phronemophobic.easel.packages/make-applet) % (:id p) nil)}]]
-                   [[::hide-commands] [::open-tools] [:com.phronemophobic.easel.package-ui/select (:id p)]])})
-     (for [p (vals catalog) :when (= :theme (:kind p))]
-       {:name (str "Theme: " (:name p)) :icon "skin"
-        :intents [[::hide-commands] [::dispatch-fn #((requiring-resolve 'com.phronemophobic.easel.packages/select-theme!) handler (:id p) true)]]})
-     (for [a (vals (:applets easel)) :when (and (not (:dock-slot a)) (not (:overlay? a)))]
-       {:name (str "Show " (:label a)) :icon (or (:icon a) "file")
-        :intents [[::hide-commands] [::focus-applet (:id a)]]}))))
+                   [[::open-package (:id p) pane-id]]
+                   [[::open-tools] [:com.phronemophobic.easel.package-ui/select (:id p)]])})
+     (for [p (sort-by :name (vals catalog)) :when (#{:theme :composition :keymap :workspace} (:kind p))]
+       {:id (keyword (str "easel.use." (namespace (:id p))) (name (:id p))) :name (str (name (:kind p)) ": " (:name p)) :icon (:icon p)
+        :intents [[::use-package (:id p)]]})
+     (for [a (vals (:applets easel)) :when (not (:overlay? a))]
+       {:id (keyword "easel.focus" (str (:id a))) :name (str "Show " (:label a)) :icon (or (:icon a) "file")
+        :intents [(if-let [slot (:dock-slot a)] [::select-dock slot] [::focus-applet (:id a)])]}))))
+
+(defn commands [easel context]
+  (let [environment (command-environment easel context)]
+    (for [[id descriptor] (sort-by (comp :name val) (command/registry (composition/current easel) environment))
+          :when (not (:hidden? descriptor))]
+      (assoc descriptor :disabled? (not (command/enabled? descriptor environment))
+                        :intents [[::invoke-command id (:pane-id environment)]]))))
+
+(defeffect ::invoke-command [id pane-id]
+  (let [easel (dispatch! :get :easel)
+        context (dispatch! :get '(keypath :membrane.component/context))
+        environment (cond-> (command-environment easel context)
+                      pane-id (assoc :pane-id pane-id
+                                     :applet-id (:applet-id (splitpane/find-pane-by-id (:root-pane easel) pane-id))))
+        descriptor (get (command/registry (composition/current easel) environment) id)]
+    (when-let [intents (command/intents descriptor environment)]
+      (when-not (= id :easel/cancel)
+        (dispatch! ::hide-commands)
+        (dispatch! ::pane-menu nil))
+      (doseq [intent intents] (apply dispatch! intent)))))
+
+(defeffect ::cancel []
+  (let [easel (dispatch! :get :easel)]
+    (cond (:commands easel) (dispatch! ::hide-commands)
+          (:help easel) (dispatch! ::finish-help)
+          (:pane-menu easel) (dispatch! ::pane-menu nil)
+          (::pane-resize (:root-pane easel)) (dispatch! ::toggle-pane-resize {:$easel '(keypath :easel) :pane-id ::root-pane}))
+    (dispatch! :update :easel dissoc :key-prefix)))
 
 (defui easel-view [{:keys [easel]}]
   (let [appearance (or (:appearance easel) (theme/current))
-        shared-context (assoc context ::theme/value appearance)
+        shared-context (assoc context ::theme/value appearance :composition/frames (:composition/frames easel))
         dock-id (get-in easel [:dock :applets (get-in easel [:dock :selected])])
         dock-applet (get-in easel [:applets dock-id])
         manager (get-in easel [:applets (:manager-id easel)])
@@ -1383,35 +1451,40 @@
                         ::begin-resize-drag ::resize-drag ::end-resize-drag}
                (dnd/drag-and-drop {:$body nil :body (model/-ui easel $context shared-context)}))
         view (shell/workspace-view
-               {:easel easel :body body :commands (commands easel)
+               {:easel easel :body body :commands (commands easel context)
                 :dock-body (when dock-applet (applet/safe-ui dock-applet $context shared-context))
                 :manager-body (when manager (applet/safe-ui manager $context shared-context))
                 :context shared-context :$context $context})]
     (ui/wrap-on :key-press
-      (fn [handler key]
-        (if (= key :escape)
-          (cond (:commands easel) [[::hide-commands]]
-                (:help easel) [[::finish-help]]
-                (:pane-menu easel) [[::pane-menu nil]]
-                (::pane-resize (:root-pane easel)) [[::toggle-pane-resize {:$easel '(keypath :easel) :pane-id ::root-pane}]]
-                :else (handler key))
-          (handler key)))
+      (fn [next-handler key]
+        (let [live (handler :get $easel)
+              code (when (keyword? key) (some (fn [[code value]] (when (= value key) code)) skia/keymap))
+              environment (command-environment easel context)
+              registry (command/registry (composition/current easel) environment)
+              match (when code (keymap/match-event (keymap/current easel) (key-scopes easel context) nil code 0
+                                                   #(command/enabled? (get registry %) environment)))]
+          (cond (and (string? key) (:key-consumed live)) []
+                (:command match) [[::invoke-command (:command match) nil]]
+                :else (next-handler key))))
       (ui/wrap-on :key-event
-        (fn [handler key scancode action mods]
+        (fn [next-handler key scancode action mods]
           (cond
-            (and (= :press action) (= 290 key)) [[::show-help]]
-            (and (= :press action) (= 71 key) (pos? (bit-and mods ui/CONTROL-MASK))
-                 (or (:commands easel) (:help easel) (:pane-menu easel) (::pane-resize (:root-pane easel))))
-            (cond (:commands easel) [[::hide-commands]]
-                  (:help easel) [[::finish-help]]
-                  (:pane-menu easel) [[::pane-menu nil]]
-                  :else [[::toggle-pane-resize {:$easel '(keypath :easel) :pane-id ::root-pane}]])
-            (and (#{:press :repeat} action) (pos? (bit-and mods (if (.startsWith (System/getProperty "os.name") "Mac") ui/SUPER-MASK ui/CONTROL-MASK))))
-            (case key
-              75 [[::show-commands ""]]
-              74 [[::toggle-dock]]
-              (handler key scancode action mods))
-            :else (handler key scancode action mods))) view))))
+            (<= 340 key 347) (next-handler key scancode action mods)
+            (= :release action)
+            (into [[:update $easel #(if (= key (:key-consumed %)) (dissoc % :key-consumed) %)]]
+                  (next-handler key scancode action mods))
+            (#{:press :repeat} action)
+            (let [environment (command-environment easel context)
+                  registry (command/registry (composition/current easel) environment)
+                  scopes (key-scopes easel context)
+                  match (keymap/match-event (keymap/current easel) scopes (:key-prefix easel) key mods
+                                           #(command/enabled? (get registry %) environment))]
+              (cond (:command match) [[:update $easel #(-> % (dissoc :key-prefix) (assoc :key-consumed key))]
+                                      [::invoke-command (:command match) nil]]
+                    (:pending match) [[:update $easel assoc :key-prefix (:pending match) :key-consumed key]]
+                    (:key-prefix easel) [[:update $easel #(-> % (dissoc :key-prefix) (assoc :key-consumed key))]]
+                    :else (into [[:update $easel dissoc :key-consumed]] (next-handler key scancode action mods))))
+            :else (next-handler key scancode action mods))) view))))
 
 (defn initialize!
   ([] (initialize! {}))
@@ -1425,7 +1498,7 @@
      (when (and preset (nil? (get-in @app-state [:easel :workspace-id])))
        ((requiring-resolve 'com.phronemophobic.easel.workspace/initialize!) handler preset))
      (when (and fresh? onboarding? (not= help/version (:onboarding/version (settings/read-settings))))
-       (handler :update :easel assoc :help {:page :start :first-run? true :offset [0 0]}))
+       (handler :update :easel #(refresh-window (assoc % :help {:page :start :first-run? true :offset [0 0]}))))
      nil)))
 
 (declare remove-all-widgets!)

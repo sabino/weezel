@@ -1,0 +1,56 @@
+{:easel/commands
+ {:id :easel/commands :name "Find a tool or command" :icon "search"
+  :intents [[:com.phronemophobic.easel/show-commands ""]]}
+ :easel/help
+ {:id :easel/help :name "Getting started and shortcuts" :icon "question-circle"
+  :intents [[:com.phronemophobic.easel/show-help]]}
+ :easel/cancel
+ {:id :easel/cancel :name "Cancel" :hidden? true
+  :enabled? com.phronemophobic.easel.commands/cancellable?
+  :intents [[:com.phronemophobic.easel/cancel]]}
+ :easel/new-editor
+ {:id :easel/new-editor :name "New blank editor" :icon "file-text"
+  :intents [[:com.phronemophobic.easel/new-editor]]}
+ :easel/open-repl
+ {:id :easel/open-repl :name "Open REPL" :icon "code"
+  :intents [[:com.phronemophobic.easel/close-tools] [:com.phronemophobic.easel/select-dock :repl]]}
+ :easel/tools
+ {:id :easel/tools :name "Tools and themes" :icon "appstore"
+  :intents [[:com.phronemophobic.easel/open-tools]]}
+ :easel/compositions
+ {:id :easel/compositions :name "Choose a composition" :icon "layout"
+  :intents [[:com.phronemophobic.easel/manage-packages :composition]]}
+ :easel/keymaps
+ {:id :easel/keymaps :name "Choose a keymap" :icon "control"
+  :intents [[:com.phronemophobic.easel/manage-packages :keymap]]}
+ :easel/toggle-dock
+ {:id :easel/toggle-dock :name "Toggle dock" :icon "layout"
+  :intents [[:com.phronemophobic.easel/toggle-dock]]}
+ :easel/save-workspace
+ {:id :easel/save-workspace :name "Save workspace" :icon "save"
+  :intents [[:com.phronemophobic.easel/save-preset]]}
+ :easel/split-right
+ {:id :easel/split-right :name "Split right"
+  :intents [[:com.phronemophobic.easel/split-direction {:pane-id ?pane-id :direction :row}]]}
+ :easel/split-below
+ {:id :easel/split-below :name "Split below"
+  :intents [[:com.phronemophobic.easel/split-direction {:pane-id ?pane-id :direction :column}]]}
+ :easel/balance-panes
+ {:id :easel/balance-panes :name "Balance panes" :icon "border"
+  :intents [[:com.phronemophobic.easel/balance-panes {:$easel ?$easel :pane-id ?root-pane-id}]]}
+ :easel/resize-panes
+ {:id :easel/resize-panes :name "Resize panes"
+  :intents [[:com.phronemophobic.easel/toggle-pane-resize {:$easel ?$easel :pane-id ?root-pane-id}]]}
+ :easel/hide-pane
+ {:id :easel/hide-pane :name "Hide pane"
+  :intents [[:com.phronemophobic.easel/hide-pane {:$easel ?$easel :pane-id ?pane-id}]]}
+ :easel/close-other-panes
+ {:id :easel/close-other-panes :name "Close other panes"
+  :intents [[:com.phronemophobic.easel/close-other-panes {:$easel ?$easel :pane-id ?pane-id}]]}
+ :easel/close-applet
+ {:id :easel/close-applet :name "Close applet"
+  :enabled? com.phronemophobic.easel.commands/applet-present?
+  :intents [[:com.phronemophobic.easel/close-applet ?applet-id]]}
+ :easel/add-applet
+ {:id :easel/add-applet :name "Add applet" :icon "plus"
+  :intents [[:com.phronemophobic.easel/add-to-pane ?pane-id]]}}

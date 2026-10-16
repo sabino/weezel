@@ -1,0 +1,43 @@
+{:composition/version 1
+ :id :easel/studio
+ :name "Studio"
+ :extends :easel/minimal
+ :keymap :easel/studio-keys
+ :root
+ {:id :root :layout :stack
+  :children
+  [{:id :studio :layout :column
+    :children
+    [{:id :topbar :role :topbar :layout :row :height :metric/topbar :padding 8 :gap 12 :background :color/header
+      :children [{:id :brand :view com.phronemophobic.easel.shell/brand :width 78}
+                 {:id :tabs :view com.phronemophobic.easel.shell/workspace-tabs :grow 1}
+                 {:id :search :view com.phronemophobic.easel.shell/command-button :width 400
+                  :props {:command :easel/commands :text "Find a tool or command" :show-shortcut? true :icon "search"}
+                  :when {:predicate com.phronemophobic.easel.composition/min-width? :args [1100]}}
+                 {:id :session :view com.phronemophobic.easel.shell/session-indicator :width 100
+                  :when {:predicate com.phronemophobic.easel.composition/min-width? :args [1250]}}
+                 {:id :help-button :view com.phronemophobic.easel.shell/command-button :width 54
+                  :props {:command :easel/help :text "Help"}}
+                 {:id :tools-button :view com.phronemophobic.easel.shell/command-button :width 62
+                  :props {:command :easel/tools :text "Tools"}}]}
+     {:id :middle :layout :row
+      :children [{:id :sidebar :role :sidebar :view com.phronemophobic.easel.shell/sidebar :width :metric/sidebar
+                  :provides #{:easel/tools-navigation}
+                  :when {:predicate com.phronemophobic.easel.composition/min-width? :args [650]}}
+                 {:id :right :layout :column
+                  :children
+                  [{:id :content :layout :column :padding :metric/gap :gap :metric/gap
+                    :children
+                    [{:id :workspace :role :workspace :layout :stack
+                      :children [{:id :panes :view com.phronemophobic.easel.shell/panes-view
+                                  :when com.phronemophobic.easel.composition/workspace-visible?}
+                                 {:id :help :view com.phronemophobic.easel.shell/help-view
+                                  :when com.phronemophobic.easel.composition/help-visible?}
+                                 {:id :manager :view com.phronemophobic.easel.shell/manager-view
+                                  :when com.phronemophobic.easel.composition/manager-visible?}]}
+                     {:id :dock :role :dock :view com.phronemophobic.easel.shell/dock
+                      :height {:token :metric/dock :offset -8} :max-height-ratio 0.35
+                      :when com.phronemophobic.easel.composition/dock-visible?}]}
+                   {:id :status :role :status :view com.phronemophobic.easel.shell/statusbar :height :metric/status}]}]}]}
+   {:id :commands :view com.phronemophobic.easel.shell/commands-overlay
+    :when com.phronemophobic.easel.composition/commands-visible?}]}}

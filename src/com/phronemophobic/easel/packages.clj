@@ -3,6 +3,9 @@
             [clojure.java.io :as io]
             [clojure.repl.deps :as deps]
             [clojure.string :as str]
+            [nextjournal.beholder :as beholder]
+            [com.phronemophobic.easel.composition :as composition]
+            [com.phronemophobic.easel.keymap :as keymap]
             [com.phronemophobic.easel.events :as events]
             [com.phronemophobic.easel.process :as process]
             [com.phronemophobic.easel.settings :as settings]
@@ -14,6 +17,7 @@
 (defonce runtime-loader (DynamicClassLoader. (clojure.lang.RT/baseLoader)))
 (defonce loaded (atom {}))
 (defonce theme-watcher (atom nil))
+(defonce data-watchers (atom {}))
 
 (defn with-runtime [f]
   (let [thread (Thread/currentThread) previous (.getContextClassLoader thread)]
@@ -25,7 +29,7 @@
   (when-not (and (map? descriptor) (= 1 (:package/version descriptor))
                  (qualified-keyword? (:id descriptor)) (string? (:name descriptor))
                  (string? (:version descriptor))
-                 (#{:applet :library :toolset :theme :workspace} (:kind descriptor))
+                 (#{:applet :library :toolset :theme :workspace :composition :keymap} (:kind descriptor))
                  (or (nil? (:deps descriptor)) (map? (:deps descriptor)))
                  (or (nil? (:requires descriptor))
                      (and (vector? (:requires descriptor)) (every? qualified-keyword? (:requires descriptor)))))
@@ -46,6 +50,8 @@
   (case (:kind descriptor)
     :theme (theme/validate (:data descriptor))
     :workspace (workspace/validate (:data descriptor))
+    :composition (composition/validate (:data descriptor))
+    :keymap (keymap/validate (:data descriptor))
     nil)
   descriptor)
 
@@ -55,6 +61,10 @@
                                  :version (or (:version descriptor) "1") :kind :theme :data descriptor}
     (:workspace/version descriptor) {:package/version 1 :id (:id descriptor) :name (:name descriptor)
                                      :version (or (:version descriptor) "1") :kind :workspace :data descriptor}
+    (:composition/version descriptor) {:package/version 1 :id (:id descriptor) :name (:name descriptor)
+                                       :version (or (:version descriptor) "1") :kind :composition :data descriptor}
+    (:keymap/version descriptor) {:package/version 1 :id (:id descriptor) :name (:name descriptor)
+                                  :version (or (:version descriptor) "1") :kind :keymap :data descriptor}
     :else descriptor))
 
 (defn builtins []
@@ -63,11 +73,17 @@
                              (theme/read-data (io/resource "com/phronemophobic/easel/packages.edn")))
                 (for [id [:easel/studio-light :easel/studio-dark]]
                   (assoc (normalize (theme/builtin id)) :bundled? true :description "Native semantic colors and component styles."))
+                (for [id (keys composition/builtin-resources)]
+                  (assoc (normalize (composition/builtin id)) :bundled? true :description "A composition of native views. Keeps the same running applets."))
+                (for [id (keys keymap/builtin-resources)]
+                  (assoc (normalize (keymap/builtin id)) :bundled? true :description "Scoped command and editor bindings, independent of appearance."))
                 (for [id (keys workspace/builtin-resources)]
                   (assoc (normalize (workspace/builtin id)) :bundled? true :description "A native workspace preset.")))))
 
 (defn catalog [] (merge (builtins) (:packages (settings/read-settings))))
 (defn theme-data [id] (or (get-in (catalog) [id :data]) (theme/builtin id)))
+(defn composition-data [id] (get-in (catalog) [id :data]))
+(defn keymap-data [id] (get-in (catalog) [id :data]))
 (defn workspace-data [id] (get-in (catalog) [id :data]))
 
 (defn plan [registry ids]
@@ -82,6 +98,19 @@
                     (when-let [parent (get-in p [:data :extends])]
                       (when-not (theme/builtin parent) (visit parent (conj path id))))
                     (theme/resolve-theme (:data p) #(or (theme/builtin %) (get-in registry [% :data]))))
+                  (when (#{:composition :keymap} (:kind p))
+                    (when-let [parent (get-in p [:data :extends])]
+                      (when-not (= (:kind p) (:kind (get registry parent)))
+                        (throw (ex-info "An inherited package must have the same kind" {:id id :parent parent})))
+                      (visit parent (conj path id)))
+                    (let [lookup #(get-in registry [% :data])]
+                      (if (= :composition (:kind p))
+                        (let [resolved (composition/resolve-composition (:data p) lookup)]
+                          (when-let [keys (:keymap resolved)]
+                            (when-not (= :keymap (:kind (get registry keys)))
+                              (throw (ex-info "A composition needs an installed keymap package" {:id keys})))
+                            (visit keys (conj path id))))
+                        (keymap/resolve-keymap (:data p) lookup))))
                   (swap! seen conj id) (swap! result conj p))))]
       (doseq [id ids] (visit id #{}))
       @result)))
@@ -146,7 +175,7 @@
     (when (:bundled? p) (throw (ex-info "This package is included with Easel" {:id id})))
     (when-let [dependent (some (fn [[other p]]
                                 (when (and (not= other id) (installed? p)
-                                           (or (some #{id} (:requires p)) (= id (get-in p [:data :extends])))) other)) registry)]
+                                           (or (some #{id} (:requires p)) (= id (get-in p [:data :extends])) (= id (get-in p [:data :keymap])))) other)) registry)]
       (throw (ex-info "Another installed package needs this package" {:id id :dependent dependent})))
     (settings/update-settings! #(-> % (update :packages dissoc id) (update :pins dissoc id)))
     {:removed id :restart? (boolean (seq (:deps p)))}))
@@ -214,6 +243,9 @@
 
 (defn select-theme! [handler id & [persist? watch?]]
   (let [resolved (theme/resolve-theme (or (theme-data id) (throw (ex-info "Theme is not installed" {:id id}))) theme-data)]
+    (when-let [easel (handler :get :easel)]
+      (let [descriptor (composition/prepare! (composition/current easel) resolved)]
+        (composition/layout descriptor (:viewport easel [1536 1024]) {:easel easel :appearance resolved})))
     (theme/apply! resolved)
     (handler :update :easel
              #(let [easel (-> % (assoc :appearance resolved) (dissoc :theme-error))]
@@ -239,13 +271,125 @@
                              % {:file target})})
     (handler :com.phronemophobic.easel/close-tools)))
 
+(defn- update-editor-keys [easel descriptor]
+  (if (= (select-keys (:scopes (keymap/current easel)) [:editor :clojure])
+         (select-keys (:scopes descriptor) [:editor :clojure]))
+    easel
+    (update easel :applets
+          (fn [applets]
+            (reduce-kv (fn [result id applet]
+                         (assoc result id
+                                (if (get-in applet [:state :editor])
+                                  (update-in applet [:state :editor]
+                                             (requiring-resolve 'com.phronemophobic.easel.clobber/apply-keymap) descriptor)
+                                  applet))) (empty applets) applets)))))
+
+(defn- resolve-keymap! [id registry]
+  (let [resolved (keymap/resolve-keymap
+                  (or (get-in registry [id :data]) (throw (ex-info "Keymap is not installed" {:id id})))
+                  #(get-in registry [% :data]))]
+    (doseq [scope [:editor :clojure] [_ intent] (get-in resolved [:scopes scope]) :when (symbol? intent)]
+      (when-not (ifn? @(requiring-resolve intent)) (throw (ex-info "An editor binding must reference a function" {:symbol intent}))))
+    resolved))
+
+(declare select-composition! select-keymap!)
+
+(defn- watch-data! [handler kind id]
+  (when-let [stop (get (first (swap-vals! data-watchers dissoc kind)) kind)] (stop))
+  (let [active? (atom true)
+        files (keep (fn [p] (when-let [origin (:origin p)]
+                               (when (and (#{:composition :keymap} (:kind p)) (.isFile (io/file origin)))
+                                 [(.getCanonicalPath (io/file origin)) p]))) (vals (catalog)))
+        watchers (mapv (fn [[path package]]
+                         (beholder/watch
+                          (bound-fn [{event-path :path :keys [type]}]
+                            (when (and @active? (#{:modify :create :delete :overflow} type)
+                                       (or (= :overflow type)
+                                           (= path (.getCanonicalPath (io/file (str event-path))))))
+                              (try
+                                (when (some #{(:id package)}
+                                            (map :id (plan (catalog)
+                                                           (cond-> [id]
+                                                             (and (= kind :composition) (:keymap/override (handler :get :easel)))
+                                                             (conj (:keymap/override (handler :get :easel)))))))
+                                 (let [updated (-> (read-source path) normalize validate)
+                                      _ (when-not (and (= (:id package) (:id updated)) (= (:kind package) (:kind updated)))
+                                          (throw (ex-info "An edited package must keep its id and kind" {})))
+                                      registry (assoc (catalog) (:id package) (merge package updated))
+                                      _ (plan registry [id])
+                                      resolved (when (= kind :composition)
+                                                 (composition/prepare! (composition/resolve-composition (get-in registry [id :data]) #(get-in registry [% :data]))))
+                                      _ (when resolved
+                                          (let [easel (handler :get :easel)]
+                                            (composition/layout resolved (:viewport easel) {:easel easel :appearance (:appearance easel)})))
+                                      keys-id (if (= kind :keymap) id
+                                                  (or (:keymap/override (handler :get :easel)) (:keymap (settings/read-settings)) (:keymap resolved) :easel/default-keys))
+                                      _ (resolve-keymap! keys-id registry)]
+                                  (when @active?
+                                    (settings/update-settings! update-in [:packages (:id package)] assoc :data (:data updated) :name (:name updated))
+                                    (if (= kind :composition) (select-composition! handler id false false)
+                                        (select-keymap! handler id false false))
+                                    (handler :update :easel dissoc :configuration-error))))
+                                (catch Throwable e
+                                  (when @active?
+                                    (events/report! e)
+                                    (handler :update :easel assoc :configuration-error (.getMessage e)))))))
+                          (.getParent (io/file path)))) files)]
+    (swap! data-watchers assoc kind
+           #(when (compare-and-set! active? true false) (run! beholder/stop watchers)))))
+
+(defn select-composition! [handler id & [persist? watch?]]
+  (with-runtime
+    #(let [registry (catalog)
+           _ (plan registry [id])
+           descriptor (composition/prepare! (composition/resolve-composition
+                                             (or (get-in registry [id :data]) (throw (ex-info "Composition is not installed" {:id id})))
+                                             (fn [id] (get-in registry [id :data]))))
+           keys (resolve-keymap! (or (:keymap/override (handler :get :easel)) (:keymap (settings/read-settings)) (:keymap descriptor) :easel/default-keys) registry)]
+       (handler :update :easel
+                (fn [easel]
+                  (-> easel (update-editor-keys keys)
+                      (assoc :composition descriptor :keymap keys)
+                      (dissoc :key-prefix :pane-menu :configuration-error)
+                      ((requiring-resolve 'com.phronemophobic.easel/refresh-window)))))
+       (when persist? (settings/update-settings! assoc :composition id))
+       (when (not= false watch?) (watch-data! handler :composition id))
+       descriptor)))
+
+(defn select-keymap! [handler id & [persist? watch?]]
+  (with-runtime
+    #(let [descriptor (resolve-keymap! id (catalog))]
+       (handler :update :easel
+                (fn [easel] (-> easel (update-editor-keys descriptor)
+                                (assoc :keymap descriptor :keymap/override id)
+                                (dissoc :key-prefix :configuration-error))))
+       (when persist? (settings/update-settings! assoc :keymap id))
+       (when (not= false watch?) (watch-data! handler :keymap id))
+       descriptor)))
+
+(defn edit-data! [handler id]
+  (let [package (get (catalog) id) kind (:kind package)]
+    (if (= :theme kind) (edit-theme! handler id)
+      (let [target (when-let [origin (:origin package)] (when (.isFile (io/file origin)) (io/file origin)))
+            [id target] (if target [id target]
+                            (let [id (keyword "user" (name id)) target (settings/file (str (name kind) "s") (str (name id) ".edn"))]
+                              (when-not (.exists target)
+                                (settings/write-data! target {(keyword (name kind) "version") 1 :id id
+                                                              :name (str (:name package) " custom") :extends (:id package)}))
+                              (import! (.getPath target)) [id target]))]
+        (if (= kind :composition) (select-composition! handler id true) (select-keymap! handler id true))
+        (handler :com.phronemophobic.easel/add-applet
+                 {:make-applet (fn [handler] ((requiring-resolve 'com.phronemophobic.easel.clobber/clobber-applet) handler {:file target}))})
+        (handler :com.phronemophobic.easel/close-tools)))))
+
 (defn suspend! [handler]
   (try
     (when-let [id (some #(when (:tool-manager? %) (get-in % [:state :preview-original]))
                         (vals (:applets (handler :get :easel))))]
       (select-theme! handler id))
     (finally
-      (when-let [stop (first (swap-vals! theme-watcher (constantly nil)))] (stop)))))
+      (when-let [stop (first (swap-vals! theme-watcher (constantly nil)))] (stop))
+      (run! (fn [[_ stop]] (stop)) (first (swap-vals! data-watchers (constantly {})))))))
 
 (defn restore! [handler]
   (try
@@ -262,7 +406,9 @@
           (with-runtime #((requiring-resolve (:setup p)))))
         (settings/update-settings! update :packages
                                    #(into {} (map (fn [[id p]] [id (dissoc p :restart?)])) %)))
-      (when-let [id (:theme config)] (select-theme! handler id)))
+      (when-let [id (:theme config)] (select-theme! handler id))
+      (select-composition! handler (:composition config :easel/minimal))
+      (when-let [id (:keymap config)] (select-keymap! handler id)))
     (catch Throwable e (events/report! e))))
 
 (defn package-applet [handler]

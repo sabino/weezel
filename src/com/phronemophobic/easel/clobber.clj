@@ -9,6 +9,7 @@
    [com.phronemophobic.easel.evaluation :as evaluation]
    [com.phronemophobic.easel.inspector :as inspector]
    [com.phronemophobic.easel.theme :as theme]
+   [com.phronemophobic.easel.keymap :as keymap]
    [com.phronemophobic.easel.ui :as eui]
    [com.phronemophobic.clobber.util :as clobber-util]
    [membrane.basic-components :as basic]
@@ -320,6 +321,11 @@
       (assoc :width width :height height)
       text-mode/editor-update-viewport))
 
+(defn apply-keymap [editor descriptor]
+  (let [base (or (:easel/base-key-bindings editor) (:key-bindings editor))]
+    (assoc editor :easel/base-key-bindings base
+                  :key-bindings (keymap/editor-bindings base descriptor (:easel/clojure? editor)))))
+
 (defn load-editor [dispatch! $ref editor-info size]
   (let [
         {:keys [editor ui]} (if (:editor editor-info)
@@ -339,20 +345,8 @@
         editor (cond-> editor
                  (:initial-value editor-info)
                  (assoc :easel/initial-value (:initial-value editor-info) :easel/initial-rope (:rope editor)))
-        editor (assoc editor
-                      :label (:label editor-info)
-                      :key-bindings
-                      (cond-> (assoc (:key-bindings editor)
-                                     "C-x 3" ::split-pane
-                                     "C-x k" ::delete-pane
-                                     "C-x b" ::show-select-buffer
-                                     "C-x o" ::focus-next
-                                     "C-x 1" ::close-other-panes
-                                     "C-x 0" ::hide-pane)
-                        (identical? ui #'cui/code-editor)
-                        (assoc "C-x C-e" ::eval-last
-                               "C-M-x" ::eval-top
-                               "C-c C-k" ::eval-buffer)))
+        editor (-> editor (assoc :label (:label editor-info) :easel/clojure? (identical? ui #'cui/code-editor))
+                   (apply-keymap (keymap/current (dispatch! :get :easel))))
 
         $editor [$ref '(keypath :state) '(keypath :editor)]]
     (dispatch!
