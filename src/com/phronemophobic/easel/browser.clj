@@ -137,7 +137,7 @@
                  (gen3/map->mouse-event
                   {:x (first pos)
                    :y (second pos)
-                   :modifiers gen3/EVENTFLAG_LEFT_MOUSE_BUTTON})
+                   :modifiers (if-let [buttons (:mouse-buttons elem)] @buttons 0)})
                  0)
 
       #_(.sendMouseMoveEvent (.getHost ^CefBrowser browser)
@@ -149,13 +149,18 @@
   ui/IMouseEvent
   (-mouse-event [elem pos button mouse-down? mods]
     (when browser
+      (let [flag (case button 0 gen3/EVENTFLAG_LEFT_MOUSE_BUTTON
+                              1 gen3/EVENTFLAG_RIGHT_MOUSE_BUTTON
+                              2 gen3/EVENTFLAG_MIDDLE_MOUSE_BUTTON 0)
+            buttons (:mouse-buttons elem)
+            flags (if buttons (swap! buttons (if mouse-down? bit-or bit-and-not) flag) 0)]
       (gen3/call (gen3/call browser :get_host)
                  :send_mouse_click_event
                  (gen3/map->mouse-event
                   {:x (first pos)
                    :y (second pos)
-                   :modifiers gen3/EVENTFLAG_LEFT_MOUSE_BUTTON})
-                 button
+                   :modifiers flags})
+                 (case button 1 2 2 1 0)
                  (if mouse-down?
                    0
                    1)
@@ -169,7 +174,7 @@
                               0
                               1)
                             1)
-      ))
+      )))
 
   ui/IScroll
   (-scroll [elem delta mpos]
@@ -276,7 +281,7 @@
                     (:height browser-info)
                     (:resource browser-info)
                     (:draw-lock browser-info))
-         :id2 (:id this))
+         :id2 (:id this) :mouse-buttons (:mouse-buttons this))
 
         view (if focus?
                (ui/wrap-on
@@ -309,7 +314,7 @@
         [[::browser-back {:browser (:browser browser-info)}]])
       (browser-bar
        (assoc ui-state
-              :width (:width browser-info)
+              :width (first (:size this))
               :ready? (some? (:browser browser-info))
               :context context
               :$context $context)))
@@ -371,7 +376,7 @@
                        (catch Throwable e
                          (events/report! e)
                          (dispatch! :update $ref assoc ::applet/error e)))))]
-      (assoc this :$ref $ref :size [width height] :resources resources
+      (assoc this :$ref $ref :size [width height] :resources resources :mouse-buttons (atom 0)
              :ui-state {:url initial-url :$url $url :extra {}
                         :$extra [$ref '(keypath :ui-state) '(keypath :extra)]}
              :browser-info {:draw-lock draw-lock :width width :height (max 1 (- height 40))}
@@ -396,7 +401,7 @@
 
 (defn browslet [handler url]
   (-> (->Browslet handler url)
-      (assoc :label "web")))
+      (assoc :label "Browser")))
 
 (comment
   (cef/download-and-extract-framework
