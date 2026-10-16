@@ -1,0 +1,13 @@
+{:workspace/version 1
+ :id :easel/ui-builder
+ :name "UI builder"
+ :applets [{:slot :components :tool :easel/ui-components :label "Components"}
+           {:slot :preview :tool :easel/ui-preview :label "Canvas" :args [user]}
+           {:slot :tree :tool :easel/ui-tree :label "Tree" :args [user]}
+           {:slot :properties :tool :easel/ui-properties :label "Properties" :args [user]}]
+ :layout {:direction :row
+          :panes [{:slot :components :flex.grow/width 20}
+                  {:slot :preview :flex.grow/width 50}
+                  {:direction :column :flex.grow/width 30
+                   :panes [{:slot :tree :flex.grow/height 45}
+                           {:slot :properties :flex.grow/height 55}]}]}}

@@ -1462,12 +1462,12 @@
                $easel #{::splitpane ::swap-panes ::toggle-pane-resize ::balance-panes ::hide-pane
                         ::close-other-panes ::clear-pane ::delete-pane ::retry-applet
                         ::begin-resize-drag ::resize-drag ::end-resize-drag}
-               (dnd/drag-and-drop {:$body nil :body (model/-ui easel $context shared-context)}))
-        view (shell/workspace-view
+               (model/-ui easel $context shared-context))
+        view (dnd/drag-and-drop {:$body nil :body (shell/workspace-view
                {:easel easel :body body :commands (commands easel context)
                 :dock-body (when dock-applet (applet/safe-ui dock-applet $context shared-context))
                 :manager-body (when manager (applet/safe-ui manager $context shared-context))
-                :context shared-context :$context $context})]
+                :context shared-context :$context $context})})]
     (ui/wrap-on :key-press
       (fn [next-handler key]
         (let [live (handler :get $easel)

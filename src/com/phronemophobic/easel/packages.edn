@@ -53,6 +53,18 @@
  {:package/version 1 :id :easel/media :name "Media" :kind :applet :version "1" :bundled? true
   :description "Preview images and play local audio with the JVM."
   :entry com.phronemophobic.easel.media/media-applet :icon "picture"}
+ {:package/version 1 :id :easel/ui-components :name "UI Components" :kind :applet :version "1" :bundled? true
+  :description "Drag native components into the UI builder canvas and tree."
+  :entry com.phronemophobic.easel.schematic2/component-picker-applet :icon "appstore"}
+ {:package/version 1 :id :easel/ui-preview :name "UI Canvas" :kind :applet :version "1" :bundled? true
+  :description "Arrange native views and open their generated Clojure source."
+  :entry com.phronemophobic.easel.schematic2/preview-applet :args [user] :icon "layout"}
+ {:package/version 1 :id :easel/ui-tree :name "UI Tree" :kind :applet :version "1" :bundled? true
+  :description "Inspect and compose the UI builder's element tree."
+  :entry com.phronemophobic.easel.schematic2/tree-applet :args [user] :icon "cluster"}
+ {:package/version 1 :id :easel/ui-properties :name "UI Properties" :kind :applet :version "1" :bundled? true
+  :description "Edit the selected UI builder element as Clojure data."
+  :entry com.phronemophobic.easel.schematic2/detail-applet :args [user] :icon "control"}
  {:package/version 1 :id :easel/membrane :name "Membrane" :kind :library :version "8ecbc9f" :bundled? true
   :description "Native UI primitives and functional components."
   :source "https://github.com/phronmophobic/membrane"}

@@ -13,10 +13,13 @@
             [com.phronemophobic.easel.shell :as shell]
             [com.phronemophobic.easel.commands :as commands]
             [com.phronemophobic.easel.events :as events]
+            [com.phronemophobic.easel.theme :as theme]
+            [com.phronemophobic.easel.ui :as eui]
             [com.phronemophobic.easel :as easel]
             [com.phronemophobic.viscous :as viscous]
             [membrane.component :as component]
             [membrane.skia]
+            [membrane.skia.paragraph :as para]
             [membrane.ui :as ui]))
 
 (deftest populated-tool-views
@@ -78,6 +81,22 @@
 
 (defn view-nodes [view]
   (tree-seq #(seq (ui/children %)) ui/children view))
+
+(deftest legacy-components-keep-readable-text-and-events-in-each-theme
+  (doseq [id [:easel/studio-light :easel/studio-dark]]
+    (let [context {::theme/value (theme/resolve-theme (theme/builtin id))}
+          color (theme/token context :color/text)
+          body (ui/on :mouse-down (fn [_] [[:test/click]])
+                      [(ui/label "Legacy label")
+                       (para/paragraph {:text "Styled span" :style {:text-style/color [0 0 0]}})])
+          view (eui/adapt-colors (ui/scrollview [200 100] [0 0] body) {[0 0 0] color} context)
+          paragraphs (filter #(instance? membrane.skia.paragraph.Paragraph %) (view-nodes view))]
+      (is (= [200 100] (:bounds view)))
+      (is (= [0 0] (:offset view)))
+      (is (= 2 (count paragraphs)))
+      (is (every? #(= color (get-in % [:paragraph-style :paragraph-style/text-style :text-style/color])) paragraphs))
+      (is (= color (some #(when (map? (:paragraph %)) (get-in % [:paragraph :style :text-style/color])) paragraphs)))
+      (is (= [[:test/click]] (ui/mouse-down view [1 1]))))))
 
 (defn button-frames
   ([view] (button-frames view [0 0]))

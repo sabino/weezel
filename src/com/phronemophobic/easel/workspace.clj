@@ -10,7 +10,8 @@
   {:easel/empty "com/phronemophobic/easel/workspaces/empty.edn"
    :easel/sketchbook "com/phronemophobic/easel/workspaces/sketchbook.edn"
    :easel/data-lab "com/phronemophobic/easel/workspaces/data_lab.edn"
-   :easel/notes "com/phronemophobic/easel/workspaces/notes.edn"})
+   :easel/notes "com/phronemophobic/easel/workspaces/notes.edn"
+   :easel/ui-builder "com/phronemophobic/easel/workspaces/ui_builder.edn"})
 
 (def entries
   {:easel/clobber 'com.phronemophobic.easel.clobber/clobber-applet

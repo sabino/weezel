@@ -79,6 +79,8 @@
         (eui/button {:text "Choose a keymap" :on-click #(vector [:com.phronemophobic.easel/finish-help]
                                                                 [:com.phronemophobic.easel/manage-packages :keymap])})])
      (ui/spacer 0 20)
+     (paragraph {:width width :text (str "Drag the grip at the left of a pane header onto another pane header to swap them. "
+                                        "The optional UI builder workspace in Tools provides a component palette, canvas, tree, and properties.")})
      (paragraph {:width width :text (str "Return to this guide with "
                                         (or (keymap/shortcut (keymap/current easel) :easel/help) "the pane menu")
                                         ". Keys and concepts explains the notation; Shortcuts shows the selected keymap.")}))

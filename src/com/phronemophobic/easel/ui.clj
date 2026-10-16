@@ -58,32 +58,42 @@
 
 (defn adapt-colors
   "Adapt a native component's palette without changing its event handlers."
-  [view palette]
-  (let [children (ui/children view)
-        view (cond
-               (and (seq children) (satisfies? ui/IMakeNode view))
-               (ui/make-node view (mapv #(adapt-colors % palette) children))
-               (and (= 1 (count children)) (map? view) (:body view))
-               (update view :body #(adapt-colors % palette))
-               (and (= 1 (count children)) (map? view) (:elem view))
-               (update view :elem #(adapt-colors % palette))
-               (and (seq children) (map? view) (contains? view :context))
-               (mapv #(adapt-colors % palette) children)
-               :else view)
-        replace-color #(get palette % %)
-        style #(cond-> %
-                 (:text-style/color %) (update :text-style/color replace-color)
-                 (get-in % [:text-style/background-color :color])
-                 (update-in [:text-style/background-color :color] replace-color))]
-    (cond-> view
-      (and (map? view) (:color view)) (update :color replace-color)
-      (instance? membrane.skia.paragraph.Paragraph view)
-      (-> (update-in [:paragraph-style :paragraph-style/text-style] style)
-          (update :paragraph
-                  (fn [content]
-                    (if (sequential? content)
-                      (mapv #(if (and (map? %) (:style %)) (update % :style style) %) content)
-                      content)))))))
+  ([view palette] (adapt-colors view palette nil))
+  ([view palette context]
+    (let [children (ui/children view)
+          view (cond
+                 ;; The pinned ScrollView.make-node reverses bounds and offset.
+                 (instance? membrane.ui.ScrollView view)
+                 (update view :drawable #(adapt-colors % palette context))
+                 (and (seq children) (satisfies? ui/IMakeNode view))
+                 (ui/make-node view (mapv #(adapt-colors % palette context) children))
+                 (and (= 1 (count children)) (map? view) (:body view) (identical? (:body view) (first children)))
+                 (update view :body #(adapt-colors % palette context))
+                 (and (= 1 (count children)) (map? view) (:elem view) (identical? (:elem view) (first children)))
+                 (update view :elem #(adapt-colors % palette context))
+                 (and (seq children) (map? view) (contains? view :context))
+                 (mapv #(adapt-colors % palette context) children)
+                 :else view)
+          view (if (and context (instance? membrane.ui.Label view))
+                 (para/paragraph (:text view) nil {:paragraph-style/text-style (text-style context)})
+                 view)
+          replace-color #(get palette % %)
+          style (fn [value]
+                  (cond-> (if context (merge (text-style context) value) value)
+                    (:text-style/color value) (update :text-style/color replace-color)
+                    (get-in value [:text-style/background-color :color])
+                    (update-in [:text-style/background-color :color] replace-color)))
+          span #(if (map? %) (update % :style style) %)]
+      (cond-> view
+        (and (map? view) (:color view)) (update :color replace-color)
+        (instance? membrane.skia.paragraph.Paragraph view)
+        (-> (update-in [:paragraph-style :paragraph-style/text-style] style)
+            (update :paragraph
+                    (fn [content]
+                      (cond
+                        (map? content) (span content)
+                        (sequential? content) (mapv span content)
+                        :else content))))))))
 
 (defn surface [context width height & [color radius]]
   (ui/with-color (theme/token context (or color :color/surface))

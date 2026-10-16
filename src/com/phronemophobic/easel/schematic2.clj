@@ -2,14 +2,77 @@
   (:require
    [membrane.ui :as ui]
    [membrane.component
-    :refer [defeffect]]
+    :refer [defui defeffect]]
+   [membrane.alpha.component.drag-and-drop :as dnd]
+   [clojure.pprint :as pprint]
    [com.rpl.specter :as specter]
+   [com.phronemophobic.easel.ui :as eui]
+   [com.phronemophobic.easel.theme :as theme]
    [com.phronemophobic.easel.model :as model]
    [com.phronemophobic.schematic.model :as sm]
    [com.phronemophobic.schematic.view.component-picker :as component-picker]
    [com.phronemophobic.schematic.view.tree :as tree]
    [com.phronemophobic.schematic.view.preview :as preview]
    [com.phronemophobic.schematic.view.detail :as detail]))
+
+(defn- eval-namespace [value]
+  (if (instance? clojure.lang.Namespace value) value
+      (or (find-ns (or value 'user))
+          (let [ns (create-ns value)] (binding [*ns* ns] (refer 'clojure.core)) ns))))
+
+(defn- native-view [size context body]
+  (let [[w h] size]
+    (ui/fixed-bounds size
+      [(eui/surface context w h)
+       (eui/adapt-colors body
+         {[0 0 0] (theme/token context :color/text)
+          [0 0 0 0.8] (theme/token context :color/text)
+          [0.0 0.0 0.0 0.88] (theme/token context :color/text)
+          [1 1 1] (theme/token context :color/surface)
+          [1.0 1.0 1.0] (theme/token context :color/surface)
+          [0.98 0.98 0.98] (theme/token context :color/surface)
+          [0.85 0.85 0.85] (theme/token context :color/header)
+          [0.8509803921568627 0.8509803921568627 0.8509803921568627] (theme/token context :color/border)
+          [1 0 0] (theme/token context :color/accent)} context)])))
+
+(defn place-element [root element [x y]]
+  (let [id (:element/id element)
+        root (if (= ::sm/relative-layout (:element/type root)) root
+                 {:element/type ::sm/relative-layout :element/id (random-uuid)
+                  :element/children (if root [root] []) :relative/layout {}})
+        root (update root :element/children
+                     (fn [children] (conj (into [] (remove #(= id (:element/id %))) children) element)))]
+    (assoc-in root [:relative/layout id] {:element/x (max 0 x) :element/y (max 0 y)})))
+
+(defn source-form [elem size]
+  `(do
+     (membrane.component/defui ~'canvas-view [{}] ~(sm/compile elem))
+     (~'canvas-view {:context {:membrane.stretch/container-size ~size}})))
+
+(defui canvas [{:keys [elem selection size eval-ns]}]
+  (let [[w h] size
+        header (eui/row nil
+                 [(eui/button {:text "Clear" :variant :text :disabled? (nil? elem)
+                               :on-click #(vector [:set $elem nil] [:set $selection #{}])})
+                  (eui/button {:text "Source" :variant :text :disabled? (nil? elem)
+                               :on-click #(vector [:com.phronemophobic.easel/add-applet
+                                                   {:make-applet
+                                                    (fn [handler]
+                                                      ((requiring-resolve 'com.phronemophobic.easel.clobber/clobber-applet)
+                                                       handler {:ns (ns-name eval-ns) :label "ui.clj"
+                                                                :string (binding [*print-length* nil *print-level* nil]
+                                                                          (with-out-str (pprint/pprint (source-form elem [w (max 0 (- h 42))]))))}))}])})])
+        body (if elem (preview/editor {:elem elem :eval-ns eval-ns})
+                 (ui/padding 24 24 (eui/text {:text "Drag a component here" :color :color/secondary})))]
+    (ui/fixed-bounds size
+      [(ui/translate 8 4 header)
+       (ui/translate 0 42
+         (dnd/on-drop
+           (fn [pos object]
+             (when-let [element (::sm/element object)]
+               [[:update $elem place-element element pos]
+                [:set $selection #{(:element/id element)}]]))
+           (ui/fixed-bounds [w (max 0 (- h 42))] body)))])))
 
 
 (defn toolbar-ui [this $context context]
@@ -86,12 +149,14 @@
                          :elem elem
                          :$elem $elem
                          :eval-ns (:eval-ns this)
+                         :selection selection
+                         :$selection $selection
                          :extra (:extra this)
                          :$extra [(:$ref this) '(keypath :extra)]))]
     (ui/scissor-view
      [0 0]
      size
-     (preview/editor state))))
+     (canvas (assoc state :size size)))))
 
 (defrecord PreviewApplet []
   model/IApplet
@@ -103,7 +168,7 @@
   (-stop [this])
   model/IUI
   (-ui [this $context context]
-    (preview-ui this $context context))
+    (native-view (:size this) context (preview-ui this $context context)))
   model/IResizable
   (-resize [this size _content-scale]
     (assoc this
@@ -112,7 +177,7 @@
 (defn preview-applet [handler eval-ns]
   (-> (->PreviewApplet)
       (assoc :label "Preview"
-             :eval-ns eval-ns)))
+             :eval-ns (eval-namespace eval-ns))))
 
 (defn tree-ui [this $context context]
   (let [size (:size this)
@@ -152,7 +217,7 @@
   (-stop [this])
   model/IUI
   (-ui [this $context context]
-    (tree-ui this $context context))
+    (native-view (:size this) context (tree-ui this $context context)))
   model/IResizable
   (-resize [this size _content-scale]
     (assoc this
@@ -161,7 +226,7 @@
 (defn tree-applet [handler eval-ns]
   (-> (->TreeApplet)
       (assoc :label "Tree View"
-             :eval-ns eval-ns)))
+             :eval-ns (eval-namespace eval-ns))))
 
 (defn component-picker-ui [this $context context]
   (let [size (:size this)
@@ -208,7 +273,7 @@
   (-stop [this])
   model/IUI
   (-ui [this $context context]
-    (component-picker-ui this $context context))
+    (native-view (:size this) context (component-picker-ui this $context context)))
   model/IResizable
   (-resize [this size _content-scale]
     (assoc this
@@ -271,7 +336,7 @@
   (-stop [this])
   model/IUI
   (-ui [this $context context]
-    (detail-ui this $context context))
+    (native-view (:size this) context (detail-ui this $context context)))
   model/IResizable
   (-resize [this size _content-scale]
     (assoc this
@@ -280,6 +345,6 @@
 (defn detail-applet [handler eval-ns]
   (-> (->DetailApplet)
       (assoc :label "Detail View"
-             :eval-ns eval-ns)))
+             :eval-ns (eval-namespace eval-ns))))
 
 
