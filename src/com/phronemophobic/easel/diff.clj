@@ -62,26 +62,45 @@
   (applet/task! dispatch! $state
                 #(let [a (.getCanonicalFile (io/file before))
                        b (.getCanonicalFile (io/file after))]
-                   {:patch (file-diff a b) :file b})))
+                   (let [patch (file-diff a b)]
+                     {:patch patch :lines (patch-lines patch) :offset 0 :file b}))))
+
+(def page-size 200)
 
 (defui diff-view [{:keys [state size]}]
-  (let [{:keys [patch file compare? before after error busy?]} state]
-    (ui/vertical-layout
+  (let [{:keys [patch file compare? before after error busy?]} state
+        lines (or (:lines state) (patch-lines (or patch "")))
+        offset (min (:offset state 0) (* page-size (quot (max 0 (dec (count lines))) page-size)))
+        footer (ui/vertical-layout
+                (ui/label (str " " (if (seq lines) (inc offset) 0) "–" (min (count lines) (+ offset page-size))
+                               " of " (count lines) " lines "))
+                (ui/horizontal-layout
+                 (applet/button {:text "Previous" :size :small :disabled? (zero? offset)
+                              :on-click #(vector [:set [$state '(keypath :offset)] (max 0 (- offset page-size))]
+                                                 [:set [$extra '(keypath ::body)] {}])})
+                 (applet/button {:text "Next" :size :small :disabled? (>= (+ offset page-size) (count lines))
+                              :on-click #(vector [:set [$state '(keypath :offset)] (+ offset page-size)]
+                                                 [:set [$extra '(keypath ::body)] {}])})))
+        header (ui/vertical-layout
      (when compare?
        (ui/vertical-layout
         (ant/text-input {:text (or before "") :$text [$state '(keypath :before)] :size :small :placeholder "Before file"})
         (ant/text-input {:text (or after "") :$text [$state '(keypath :after)] :size :small :placeholder "After file"})
-        (ant/button {:text "Compare files" :size :small :disabled? busy?
+        (applet/button {:text "Compare files" :size :small
+                     :disabled? (or busy? (str/blank? before) (str/blank? after))
                      :on-click #(vector [::compare-files $state before after])})))
      (when error (ui/label error))
-     (when busy? (ui/label "Comparing…"))
+     (when busy? (ui/label "Comparing…")))]
+    (ui/vertical-layout
+     header
      (basic/scrollview
-      {:scroll-bounds [(max 0 (first size)) (max 0 (- (second size) (if compare? 115 15)))]
+      {:scroll-bounds [(max 0 (first size)) (max 0 (- (second size) (ui/height header) (ui/height footer)))]
+       :extra (get extra ::body) :$extra [$extra '(keypath ::body)]
        :$body nil
        :body
        (if (seq patch)
          (apply ui/vertical-layout
-                (for [{:keys [text kind old-line new-line]} (patch-lines patch)]
+                (for [{:keys [text kind old-line new-line]} (take page-size (drop offset lines))]
                   (ui/on-click
                    (fn []
                      (when (and file new-line (.isFile (io/file file)))
@@ -96,7 +115,9 @@
                                     [0.15 0.15 0.15])
                      (ui/label (format "%5s %5s %s" (or old-line "") (or new-line "") text)
                                (ui/font "Menlo" 11))))))
-         (ui/label "No differences"))}))))
+         (ui/label "No differences"))})
+     footer)))
 
 (defn diff-applet [_handler info]
-  (applet/tool-applet "Diff" #'diff-view info))
+  (applet/tool-applet "Diff" #'diff-view
+                      (assoc info :lines (or (:lines info) (patch-lines (or (:patch info) ""))))))

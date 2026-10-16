@@ -18,6 +18,10 @@
     (let [target "com.phronemophobic.easel.flowstorm-test/traced-function"]
       (try
         (flowstorm/perform! :start nil)
+        ((flowstorm/api 'flow-storm.api/start-recording))
+        (is (:recording? (flowstorm/perform! :refresh nil)))
+        ((flowstorm/api 'flow-storm.api/stop-recording))
+        (is (false? (:recording? (flowstorm/perform! :refresh nil))))
         (flowstorm/perform! :record nil)
         (flowstorm/perform! :instrument target)
         (is (= 16 (traced-function 3)))

@@ -79,3 +79,25 @@
 (deftest command-timeout
   (is (thrown-with-msg? clojure.lang.ExceptionInfo #"timed out"
                         (process/run ["/bin/sleep" "2"] {:timeout-ms 20}))))
+
+(deftest bounded-command-output
+  (is (thrown-with-msg? clojure.lang.ExceptionInfo #"display limit"
+                        (process/run ["/bin/sh" "-c" "printf '%1000s' x"] {:max-output-chars 100})))
+  (is (= {:exit 7 :out "hello" :err "error"}
+         (process/run ["/bin/sh" "-c" "printf hello; printf error >&2; exit 7"])))
+  (is (= "env-value" (:out (process/run ["/bin/sh" "-c" "printf '%s' \"$EASEL_TEST\""]
+                                         {:env {"EASEL_TEST" "env-value"}})))))
+
+(deftest timed-out-command-stops-its-child
+  (let [pid-file (java.io.File/createTempFile "easel-child-" ".pid")]
+    (try
+      (is (thrown-with-msg? clojure.lang.ExceptionInfo #"timed out"
+                            (process/run ["/bin/sh" "-c" "sleep 15 & child=$!; printf '%s' \"$child\" > \"$1\"; wait"
+                                          "easel-test" (str pid-file)] {:timeout-ms 250})))
+      (let [pid (Long/parseLong (slurp pid-file))]
+        (is (loop [attempts 200]
+              (let [handle (java.lang.ProcessHandle/of pid)]
+                (or (.isEmpty handle)
+                    (not (.isAlive ^java.lang.ProcessHandle (.get handle)))
+                    (when (pos? attempts) (Thread/sleep 10) (recur (dec attempts))))))))
+      (finally (.delete pid-file)))))

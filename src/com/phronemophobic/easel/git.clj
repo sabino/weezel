@@ -13,7 +13,7 @@
   (into ["git" "--no-pager" "--literal-pathspecs" "-C" (str repository)] args))
 
 (defn git [repository & args]
-  (process/checked (apply command repository args)))
+  (process/checked (apply command repository args) {:env {"GIT_TERMINAL_PROMPT" "0"}}))
 
 (defn repository-root [directory]
   (str/replace (git directory "rev-parse" "--show-toplevel") #"\r?\n$" ""))
@@ -35,7 +35,11 @@
   (parse-status (git repository "status" "--porcelain=v1" "-z" "--untracked-files=all")))
 
 (defn has-head? [repository]
-  (zero? (:exit (process/run (command repository "rev-parse" "--verify" "HEAD")))))
+  (let [{:keys [exit err]} (process/run (command repository "rev-parse" "--verify" "--quiet" "HEAD"))]
+    (case exit
+      0 true
+      1 false
+      (throw (ex-info err {:exit exit})))))
 
 (defn history [repository]
   (if (has-head? repository)
@@ -46,7 +50,7 @@
 
 (defn refresh [directory]
   (let [repository (repository-root directory)]
-    {:repository repository
+    {:repository repository :loaded-directory (str directory) :offset 0
      :branch (let [branch (process/run (command repository "symbolic-ref" "--quiet" "--short" "HEAD"))]
                (if (zero? (:exit branch))
                  (str/trim (:out branch))
@@ -77,6 +81,7 @@
            (concat (when staged? ["--cached"]) ["--"] (paths entry)))))
 
 (defeffect ::refresh [$state repository]
+  (dispatch! :update $state dissoc :repository :loaded-directory :files :history :branch)
   (applet/task! dispatch! $state #(refresh repository)))
 
 (defeffect ::change [$state repository action argument]
@@ -90,61 +95,82 @@
 
 (defeffect ::diff [$state repository entry staged?]
   (applet/task! dispatch! $state
-    (fn []
-      (let [patch (file-patch repository entry staged?)]
-        (dispatch! :com.phronemophobic.easel/add-applet
-                   {:make-applet #(diff/diff-applet % {:patch patch
-                                                      :file (io/file repository (:path entry))})})
-        {}))))
+                #(hash-map :patch (file-patch repository entry staged?)
+                           :file (when-not staged? (io/file repository (:path entry))))
+                (fn [info]
+                  (dispatch! :com.phronemophobic.easel/add-applet
+                             {:make-applet #(diff/diff-applet % info)}))))
 
 (defeffect ::show-commit [$state repository revision]
   (applet/task! dispatch! $state
-                #(let [patch (git repository "show" "--format=fuller" "--no-ext-diff"
-                                  "--no-textconv" "--no-color" revision "--")]
-                   (dispatch! :com.phronemophobic.easel/add-applet
-                              {:make-applet (fn [handler] (diff/diff-applet handler {:patch patch}))})
-                   {})))
+                #(hash-map :patch (git repository "show" "--format=fuller" "--no-ext-diff"
+                                        "--no-textconv" "--no-color" revision "--"))
+                (fn [info]
+                  (dispatch! :com.phronemophobic.easel/add-applet
+                             {:make-applet #(diff/diff-applet % info)}))))
+
+(def page-size 100)
 
 (defui git-view [{:keys [state size]}]
   (let [{:keys [repository files branch history busy? error]} state
         message (:message state "")
-        directory (:directory state "")]
+        directory (:directory state "")
+        stale? (not= directory (:loaded-directory state))
+        disabled? (or busy? stale? (nil? repository))
+        offset (min (:offset state 0) (* page-size (quot (max 0 (dec (count files))) page-size)))
+        actions-layout (if (< (first size) 200) ui/vertical-layout ui/horizontal-layout)
+        header
+        (ui/vertical-layout
+         (ant/text-input {:text directory :$text [$state '(keypath :directory)] :size :small
+                          :disabled? busy? :placeholder "Repository directory"})
+         (applet/button {:text "Refresh" :size :small :disabled? busy?
+                      :on-click #(vector [::refresh $state directory])})
+         (ui/label (str "Branch: " branch (when busy? " | Working…")))
+         (when (and stale? (not busy?)) (ui/label "Refresh to load this directory"))
+         (when error (ui/label error))
+         (ant/text-input {:text message :$text [$state '(keypath :message)] :size :small
+                          :disabled? busy? :placeholder "Commit message"})
+         (applet/button {:text "Commit staged" :size :small
+                      :disabled? (or disabled? (str/blank? message)
+                                      (not-any? #(not (#{" " "?" "!"} (:index %))) files))
+                      :on-click #(vector [::change $state repository :commit message])})
+         (when (> (count files) page-size)
+           (ui/vertical-layout
+            (ui/label (str (inc offset) "–" (min (count files) (+ offset page-size)) " of " (count files) " files"))
+            (ui/horizontal-layout
+             (applet/button {:text "Previous" :size :small :disabled? (zero? offset)
+                          :on-click #(vector [:set [$state '(keypath :offset)] (max 0 (- offset page-size))]
+                                             [:set [$extra '(keypath ::body)] {}])})
+             (applet/button {:text "Next" :size :small :disabled? (>= (+ offset page-size) (count files))
+                          :on-click #(vector [:set [$state '(keypath :offset)] (+ offset page-size)]
+                                             [:set [$extra '(keypath ::body)] {}])})))))]
     (ui/vertical-layout
-     (ui/horizontal-layout
-      (ant/text-input {:text directory :$text [$state '(keypath :directory)] :size :small
-                       :placeholder "Repository directory"})
-      (ant/button {:text "Refresh" :size :small :disabled? busy?
-                   :on-click #(vector [::refresh $state directory])}))
-     (ui/label (str repository " | Branch: " branch (when busy? " | Working…")))
-     (when error (ui/label error))
-     (ui/horizontal-layout
-      (ant/text-input {:text message :$text [$state '(keypath :message)] :size :small
-                       :placeholder "Commit message"})
-      (ant/button {:text "Commit staged" :size :small
-                   :disabled? (or busy? (str/blank? message)
-                                   (not-any? #(not (#{" " "?" "!"} (:index %))) files))
-                   :on-click #(vector [::change $state repository :commit message])}))
+     header
      (basic/scrollview
-      {:scroll-bounds [(max 0 (first size)) (max 0 (- (second size) 105))]
+      {:scroll-bounds [(max 0 (first size)) (max 0 (- (second size) (ui/height header)))]
+       :extra (get extra ::body) :$extra [$extra '(keypath ::body)]
        :$body nil
        :body
        (apply ui/vertical-layout
               (concat
-               (for [entry files]
+               (for [entry (take page-size (drop offset files))]
                  (ui/vertical-layout
                   (ui/label (str (:index entry) (:worktree entry) " " (:path entry)))
-                  (ui/horizontal-layout
-                   (ant/button {:text "Stage" :size :small :disabled? busy?
+                  (actions-layout
+                   (applet/button {:text "Stage" :size :small :disabled? (or disabled? (= " " (:worktree entry)))
                                 :on-click #(vector [::change $state repository :stage entry])})
-                   (ant/button {:text "Unstage" :size :small :disabled? busy?
-                                :on-click #(vector [::change $state repository :unstage entry])})
-                   (ant/button {:text "Working diff" :size :small
+                   (applet/button {:text "Unstage" :size :small :disabled? (or disabled? (#{" " "?" "!"} (:index entry)))
+                                :on-click #(vector [::change $state repository :unstage entry])}))
+                  (actions-layout
+                   (applet/button {:text "Working diff" :size :small
+                                :disabled? (or disabled? (= " " (:worktree entry)))
                                 :on-click #(vector [::diff $state repository entry false])})
-                   (ant/button {:text "Staged diff" :size :small
+                   (applet/button {:text "Staged diff" :size :small
+                                :disabled? (or disabled? (#{" " "?" "!"} (:index entry)))
                                 :on-click #(vector [::diff $state repository entry true])}))))
                [(ui/label "Recent commits")]
                (for [commit history]
-                 (ui/on-click #(vector [::show-commit $state repository (:hash commit)])
+                 (ui/on-click #(when-not disabled? [[::show-commit $state repository (:hash commit)]])
                               (ui/label (str (:hash commit) " " (:subject commit) " | " (:author commit)))))))}))))
 
 (defn git-applet

@@ -3,6 +3,7 @@
             [com.phronemophobic.easel.applet :as applet]
             [com.phronemophobic.membrandt :as ant]
             [membrane.component :refer [defui defeffect]]
+            [membrane.basic-components :as basic]
             [membrane.ui :as ui]))
 
 (defonce runtime-state (atom {:started? false :recording? false :instrumented #{}}))
@@ -26,6 +27,7 @@
     (case action
       :start (do ((api 'flow-storm.runtime.debuggers-api/start-runtime))
                  (swap! runtime-state assoc :started? true))
+      :refresh nil
       :open (do ((api 'flow-storm.api/local-connect) {})
                 (swap! runtime-state assoc :started? true :debugger-open? true))
       :record (do ((api 'flow-storm.api/start-recording))
@@ -45,7 +47,9 @@
                 ((api 'flow-storm.api/stop))
                 ((api 'flow-storm.runtime.debuggers-api/stop-runtime)))
               (reset! runtime-state {:started? false :recording? false :instrumented #{}})))
-    @runtime-state))
+    (let [started? (boolean ((api 'flow-storm.runtime.debuggers-api/runtime-started?)))]
+      (swap! runtime-state assoc :started? started?
+             :recording? (and started? (boolean ((api 'flow-storm.tracer/recording?))))))))
 
 (defeffect ::perform [$state action target]
   (applet/task! dispatch! $state #(do (perform! action target) {})))
@@ -54,28 +58,33 @@
   (let [{:keys [started? recording? instrumented]} (:runtime state)
         target (:target state "")
         busy? (:busy? state)]
-    (ui/vertical-layout
+    (basic/scrollview
+     {:scroll-bounds size :$body nil
+      :body
+      (ui/vertical-layout
      (ui/label (str "FlowStorm | " (if started? "Running" "Stopped")
                     " | " (if recording? "Recording" "Paused")))
-     (ui/horizontal-layout
-      (ant/button {:text "Start tracing" :size :small :disabled? (or busy? started?)
+     (ui/vertical-layout
+      (applet/button {:text "Refresh" :size :small :disabled? busy?
+                   :on-click #(vector [::perform $state :refresh nil])})
+      (applet/button {:text "Start tracing" :size :small :disabled? (or busy? started?)
                    :on-click #(vector [::perform $state :start nil])})
-      (ant/button {:text "Open debugger" :size :small :disabled? busy?
+      (applet/button {:text "Open debugger" :size :small :disabled? busy?
                    :on-click #(vector [::perform $state :open nil])})
-      (ant/button {:text (if recording? "Pause" "Record") :size :small
+      (applet/button {:text (if recording? "Pause" "Record") :size :small
                    :disabled? (or busy? (not started?))
                    :on-click #(vector [::perform $state (if recording? :pause :record) nil])})
-      (ant/button {:text "Stop" :size :small :disabled? (or busy? (not started?))
+      (applet/button {:text "Stop" :size :small :disabled? (or busy? (not started?))
                    :on-click #(vector [::perform $state :stop nil])}))
      (ant/text-input {:text target :$text [$state '(keypath :target)] :size :small
                       :placeholder "namespace/function"})
-     (ui/horizontal-layout
-      (ant/button {:text "Instrument var" :size :small :disabled? (or busy? (not started?))
+     (ui/vertical-layout
+      (applet/button {:text "Instrument var" :size :small :disabled? (or busy? (not started?) (str/blank? target))
                    :on-click #(vector [::perform $state :instrument target])})
-      (ant/button {:text "Uninstrument var" :size :small :disabled? (or busy? (not started?))
+      (applet/button {:text "Uninstrument var" :size :small :disabled? (or busy? (not started?) (str/blank? target))
                    :on-click #(vector [::perform $state :uninstrument target])}))
      (when-let [error (:error state)] (ui/label error))
-     (apply ui/vertical-layout (map #(ui/label (str %)) (sort instrumented))))))
+     (apply ui/vertical-layout (map #(ui/label (str %)) (sort instrumented))))})))
 
 (defn flowstorm-applet [handler]
   (applet/tool-applet
