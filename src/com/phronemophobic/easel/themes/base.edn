@@ -39,5 +39,30 @@
  {:button {:height 32 :padding 12 :radius :radius/control}
   :field {:height 36 :padding 12 :radius :radius/control}
   :row {:height 40 :padding 12}
-  :pane {:header-height :metric/pane-header :padding :space/pane}}
+  :pane {:header-height :metric/pane-header :padding :space/pane}
+  :legacy {:palette {[0 0 0] :color/text
+                     [0 0 0 0.8] :color/text
+                     [0.0 0.0 0.0 0.88] :color/text
+                     [1 1 1] :color/surface
+                     [1.0 1.0 1.0] :color/surface
+                     [0.98 0.98 0.98] :color/surface
+                     [0.97 0.97 0.97] :color/header
+                     [0.85 0.85 0.85] :color/header
+                     [0.8509803921568627 0.8509803921568627 0.8509803921568627] :color/border
+                     [0.941 0.941 0.941] :color/header
+                     [0.73 0.73 0.73] :color/muted
+                     [0.89 0.89 0.89] :color/border
+                     [1 0 1 0.5] :color/accent
+                     [1 0 0] :color/accent}
+           :syntax {:keyword :color/code-keyword :number :color/code-string
+                    :string :color/code-string :bracket :color/code-symbol
+                    :qualifier :color/code-definition :def :color/code-definition
+                    :comment :color/code-comment :attribute :color/code-keyword
+                    :type :color/code-definition :quote :color/code-definition
+                    :header :color/accent}
+           :code-syntax {:definition :color/code-definition :special :color/code-definition
+                         :default :color/code-comment :green :color/accent
+                         :string :color/code-string :stringst :color/code-string
+                         :keyword :color/code-keyword :red :color/accent
+                         :plain :color/code-symbol :comment :color/code-comment}}}
  :applets {}}

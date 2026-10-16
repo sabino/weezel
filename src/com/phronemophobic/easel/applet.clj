@@ -99,13 +99,14 @@
         (stop))))
   model/IUI
   (-ui [this $context context]
-    (view {:state (:state this)
+    (eui/legacy-view context (:size this)
+     (view {:state (:state this)
            :$state [(:$ref this) '(keypath :state)]
            :size (:size this)
            :extra (:extra this)
            :$extra [(:$ref this) '(keypath :extra)]
            :context context
-           :$context $context}))
+           :$context $context})))
   model/IResizable
   (-resize [this size _content-scale]
     (assoc this :size size)))

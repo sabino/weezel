@@ -16,8 +16,12 @@
             [com.phronemophobic.easel.theme :as theme]
             [com.phronemophobic.easel.ui :as eui]
             [com.phronemophobic.easel :as easel]
+            [com.phronemophobic.membrandt :as ant]
             [com.phronemophobic.viscous :as viscous]
+            [liq.buffer :as buffer]
+            [membrane.basic-components :as basic]
             [membrane.component :as component]
+            [membrane.components.code-editor.code-editor :as legacy-editor]
             [membrane.skia]
             [membrane.skia.paragraph :as para]
             [membrane.ui :as ui]))
@@ -97,6 +101,46 @@
       (is (every? #(= color (get-in % [:paragraph-style :paragraph-style/text-style :text-style/color])) paragraphs))
       (is (= color (some #(when (map? (:paragraph %)) (get-in % [:paragraph :style :text-style/color])) paragraphs)))
       (is (= [[:test/click]] (ui/mouse-down view [1 1]))))))
+
+(deftest legacy-cached-editors-and-contextless-controls-use-the-theme
+  (doseq [id [:easel/studio-light :easel/studio-dark]]
+    (let [context {::theme/value (theme/resolve-theme (theme/builtin id))}
+          editor (legacy-editor/->Buffer legacy-editor/buffer-font false
+                                         (buffer/buffer "(def answer {:ready? true})" {:mode :insert}))
+          view (eui/legacy-view context [640 200]
+                 [(ui/->Cached editor)
+                  (ui/translate 300 0 (ant/button {:text "Generated button" :on-click #(vector [:test/click])}))
+                  (ui/translate 0 80 (basic/textarea {:text "Editable name" :font (ui/font nil 17)}))])
+          nodes (vec (view-nodes view))
+          paragraphs (filter #(instance? membrane.skia.paragraph.Paragraph %) nodes)
+          generated (some #(when (= "Generated button" (:paragraph %)) %) paragraphs)
+          editable (some #(when (= "Editable name" (:paragraph %)) %) paragraphs)
+          colors (set (keep #(get-in % [:paragraph-style :paragraph-style/text-style :text-style/color]) paragraphs))]
+      (is (empty? (keep #(when (instance? membrane.ui.Label %) (:text %)) nodes)))
+      (is (= 17 (get-in editable [:paragraph-style :paragraph-style/text-style :text-style/font-size])))
+      (is (= [(first (theme/token context :font/ui))]
+             (get-in editable [:paragraph-style :paragraph-style/text-style :text-style/font-families])))
+      (is (= (theme/token context :color/text)
+             (get-in generated [:paragraph-style :paragraph-style/text-style :text-style/color])))
+      (is (contains? colors (theme/token context :color/code-keyword)))
+      (is (contains? colors (theme/token context :color/code-definition)))
+      (is (not-any? #(= [1 1 1] (:color %)) nodes))
+      (is (= [[:test/click]] (ui/mouse-down view [305 5])))
+      (is (= (ui/bounds editor)
+             (ui/bounds (eui/adapt-colors editor (eui/legacy-palette context) context)))))))
+
+(deftest legacy-adaptation-preserves-uneven-padding-and-scroll-geometry
+  (let [context {::theme/value (theme/resolve-theme (theme/builtin :easel/studio-dark))}
+        body (ui/padding 3 11 17 23
+                         (ui/on :mouse-down (fn [_] [[:test/click]]) (ui/rectangle 40 20)))
+        original (ui/scrollview [100 80] [-4 -1] body)
+        adapted (eui/adapt-colors original (eui/legacy-palette context) context)]
+    (is (= (select-keys original [:bounds :offset]) (select-keys adapted [:bounds :offset])))
+    (is (= (select-keys body [:top :right :bottom :left])
+           (select-keys (:drawable adapted) [:top :right :bottom :left])))
+    (is (= (ui/bounds body) (ui/bounds (:drawable adapted))))
+    (is (= [[:test/click]] (ui/mouse-down original [20 3]) (ui/mouse-down adapted [20 3])))
+    (is (nil? (ui/mouse-down adapted [4 22])))))
 
 (defn button-frames
   ([view] (button-frames view [0 0]))

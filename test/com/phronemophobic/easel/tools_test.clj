@@ -1,6 +1,7 @@
 (ns com.phronemophobic.easel.tools-test
   (:require [clojure.test :refer [deftest is testing]]
             [com.phronemophobic.easel.applet :as applet]
+            [com.phronemophobic.easel.builder-test :as views]
             [com.phronemophobic.easel.events :as events]
             [com.phronemophobic.easel.exceptions :as exceptions]
             [com.phronemophobic.easel.inspector :as inspector]
@@ -9,8 +10,11 @@
             [com.phronemophobic.easel :as easel]
             [com.phronemophobic.easel.spreadsheet :as spreadsheet]
             [com.phronemophobic.easel.tap-watcher :as tap]
+            [com.phronemophobic.easel.theme :as theme]
             [com.rpl.specter :as specter]
-            [membrane.component :as component])
+            [liq.buffer :as buffer]
+            [membrane.component :as component :refer [defui]]
+            [membrane.ui :as ui])
   (:import [java.util.logging Logger]))
 
 (deftest bounded-history
@@ -199,6 +203,48 @@
         (is (not (.isAlive ^Thread worker)))
         (is (= before (count (.getWatches easel/app-state)))))
       (finally (model/-stop applet) (reset! easel/app-state previous)))))
+
+(defui sheet-view [{:keys [sheet]}]
+  (model/-ui sheet $context context))
+
+(deftest spreadsheet-can-edit-themed-formulas-and-recalculate-dependent-cells
+  (let [previous @easel/app-state
+        sheet (model/-start (spreadsheet/spreadsheet-applet easel/handler)
+                            '(keypath :sheet) [640 480] [1 1])
+        wait-until (fn [f] (loop [n 300] (or (f) (when (pos? n) (Thread/sleep 10) (recur (dec n))))))
+        result #(some-> (get-in @easel/app-state [:sheet :results %]) deref)
+        app (component/make-app #'sheet-view easel/app-state easel/handler)]
+    (try
+      (reset! easel/app-state {:sheet sheet})
+      (run! #(%) (::model/queue sheet))
+      (doseq [id [:easel/studio-light :easel/studio-dark]]
+        (easel/handler :set [:membrane.component/context ::theme/value] (theme/resolve-theme (theme/builtin id)))
+        (easel/handler :update '(keypath :sheet) assoc :ss
+                       [{:id :answer :name "answer" :editor :code-editor
+                         :src (buffer/buffer "(+ 20 22)" {:mode :insert})}
+                        {:id :scale :name "scale" :editor :number-slider :src 3}
+                        {:id :total :name "total" :editor :code-editor
+                         :src (buffer/buffer "(* answer scale)" {:mode :insert})}])
+        (is (wait-until #(= 126 (result :total))))
+        (let [{:keys [x y] :as formula} (first (views/frames (app) #(= "(" (:paragraph %))))]
+          (is (some? formula))
+          (when formula
+            (ui/mouse-down (app) [(+ x 2) (+ y 2)])
+            (dotimes [_ 12] (ui/key-press (app) :right))
+            (dotimes [_ 12] (ui/key-press (app) :backspace))
+            (ui/clipboard-paste (app) "100")
+            (is (= "100" (buffer/text (get-in @easel/app-state [:sheet :ss 0 :src]))))
+            (is (wait-until #(= 300 (result :total))))
+            (is (= 100 (result :answer)))))
+        (doseq [size [[640 480] [240 160] [0 0]]]
+          (easel/handler :update '(keypath :sheet) model/-resize size [2 2])
+          (let [view (app) nodes (tree-seq #(seq (ui/children %)) ui/children view)]
+            (is (= size (ui/bounds view)))
+            (is (not-any? #(instance? membrane.ui.Label %) nodes))))
+        (easel/handler :update '(keypath :sheet) model/-resize [640 480] [1 1]))
+      (finally
+        (model/-stop sheet)
+        (reset! easel/app-state previous)))))
 
 (deftest spreadsheet-closed-before-start-does-not-create-a-worker
   (let [applet (model/-start (spreadsheet/spreadsheet-applet easel/handler)

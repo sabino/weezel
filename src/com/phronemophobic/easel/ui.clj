@@ -1,11 +1,13 @@
 (ns com.phronemophobic.easel.ui
   "Small native components which consume semantic theme tokens."
   (:require [com.phronemophobic.easel.theme :as theme]
+            [com.phronemophobic.viscous :as viscous]
             [com.phronemophobic.membrandt :as ant]
             [com.phronemophobic.membrandt.icon :as icons]
             [com.phronemophobic.membrandt.icon.impl.common :as icon-common]
             [membrane.basic-components :as basic]
             [membrane.component :refer [defui]]
+            [membrane.components.code-editor.code-editor :as legacy-editor]
             [membrane.skia :as skia]
             [membrane.skia.paragraph :as para]
             [membrane.ui :as ui]))
@@ -56,48 +58,88 @@
 
 (defui code [{:keys [text width size]}] (code-paragraph context text width size))
 
+(defn- label-style [context font color]
+  (let [family (:name font)
+        size (or (:size font) (theme/token context :font/size))]
+    (cond-> (dissoc (text-style context {:color color :size size})
+                   :text-style/height :text-style/height-override)
+      family (assoc :text-style/font-families [family]))))
+
 (defn adapt-colors
   "Adapt a native component's palette without changing its event handlers."
   ([view palette] (adapt-colors view palette nil))
   ([view palette context]
-    (let [children (ui/children view)
-          view (cond
-                 ;; The pinned ScrollView.make-node reverses bounds and offset.
-                 (instance? membrane.ui.ScrollView view)
-                 (update view :drawable #(adapt-colors % palette context))
-                 (and (seq children) (satisfies? ui/IMakeNode view))
-                 (ui/make-node view (mapv #(adapt-colors % palette context) children))
-                 (and (= 1 (count children)) (map? view) (:body view) (identical? (:body view) (first children)))
-                 (update view :body #(adapt-colors % palette context))
-                 (and (= 1 (count children)) (map? view) (:elem view) (identical? (:elem view) (first children)))
-                 (update view :elem #(adapt-colors % palette context))
-                 (and (seq children) (map? view) (contains? view :context))
-                 (mapv #(adapt-colors % palette context) children)
-                 :else view)
-          view (if (and context (instance? membrane.ui.Label view))
-                 (para/paragraph (:text view) nil {:paragraph-style/text-style (text-style context)})
-                 view)
-          replace-color #(get palette % %)
-          style (fn [value]
-                  (cond-> (if context (merge (text-style context) value) value)
-                    (:text-style/color value) (update :text-style/color replace-color)
-                    (get-in value [:text-style/background-color :color])
-                    (update-in [:text-style/background-color :color] replace-color)))
-          span #(if (map? %) (update % :style style) %)]
-      (cond-> view
-        (and (map? view) (:color view)) (update :color replace-color)
-        (instance? membrane.skia.paragraph.Paragraph view)
-        (-> (update-in [:paragraph-style :paragraph-style/text-style] style)
-            (update :paragraph
-                    (fn [content]
-                      (cond
-                        (map? content) (span content)
-                        (sequential? content) (mapv span content)
-                        :else content))))))))
+   (let [replace-color #(get palette % %)]
+     (letfn [(adapt [view inherited-color]
+               (let [view (if (and context (instance? membrane.components.code_editor.code_editor.Buffer view))
+                            (update view :buf legacy-editor/highlight) view)
+                     view (if (and context (map? view) (contains? view :font) (nil? (:name (:font view))))
+                            (assoc view :font (merge (ui/font (first (theme/token context :font/ui))
+                                                             (or (:size (:font view)) (theme/token context :font/size)))
+                                                    (dissoc (:font view) :name :size)))
+                            view)
+                     color (if-let [color (and (map? view) (:color view))]
+                             (replace-color color) inherited-color)
+                     children (ui/children view)
+                     child #(adapt % color)
+                     view (cond
+                            (and context view (.startsWith (.getName (class view)) "com.phronemophobic.easel.ui.")) view
+                            (instance? membrane.components.code_editor.code_editor.Buffer view)
+                            (ui/fixed-bounds (ui/bounds view) (mapv child children))
+                            ;; Preserve wrapper fields: the pinned Padding and ScrollView make-node reorder them.
+                            (and (= 1 (count children)) (map? view) (:drawable view) (identical? (:drawable view) (first children)))
+                            (update view :drawable child)
+                            (and (seq children) (satisfies? ui/IMakeNode view)) (ui/make-node view (mapv child children))
+                            (and (= 1 (count children)) (map? view) (:body view) (identical? (:body view) (first children)))
+                            (update view :body child)
+                            (and (= 1 (count children)) (map? view) (:elem view) (identical? (:elem view) (first children)))
+                            (update view :elem child)
+                            (and (seq children) (map? view)
+                                 (or (contains? view :context)
+                                     ;; Legacy controls can also be constructed outside defui.
+                                     (.startsWith (.getName (class view)) "com.phronemophobic.membrandt.")
+                                     (.startsWith (.getName (class view)) "membrane.basic_components.")))
+                            (mapv child children)
+                            :else view)
+                     view (if (and context (instance? membrane.ui.Label view))
+                            (para/paragraph (:text view) nil {:paragraph-style/text-style (label-style context (:font view) color)})
+                            view)
+                     style (fn [value]
+                             (cond-> (if context (merge (label-style context nil color) value) value)
+                               (:text-style/color value) (update :text-style/color replace-color)
+                               (get-in value [:text-style/background-color :color])
+                               (update-in [:text-style/background-color :color] replace-color)))
+                     span #(if (map? %) (update % :style style) %)]
+                 (cond-> view
+                   (and (map? view) (:color view)) (update :color replace-color)
+                   (instance? membrane.skia.paragraph.Paragraph view)
+                   (-> (update-in [:paragraph-style :paragraph-style/text-style] style)
+                       (update :paragraph
+                               (fn [content]
+                                 (cond (map? content) (span content)
+                                       (sequential? content) (mapv span content)
+                                       :else content)))))))]
+       (adapt view nil)))))
+
+(defn legacy-palette [context]
+  (let [{:keys [palette syntax code-syntax]} (theme/component context :legacy)]
+    (into {} (map (fn [[color token]] [color (if (keyword? token) (theme/token context token) token)]))
+          (concat palette
+                  (keep (fn [[name token]] (when-let [color (get viscous/colors name)] [color token])) syntax)
+                  (keep (fn [[name token]] (when-let [color (get legacy-editor/colors name)] [color token])) code-syntax)))))
 
 (defn surface [context width height & [color radius]]
   (ui/with-color (theme/token context (or color :color/surface))
     (ui/with-style ::ui/style-fill (ui/rounded-rectangle (max 0 width) (max 0 height) (or radius 0)))))
+
+(defn legacy-view
+  ([context size body] (legacy-view context size body {}))
+  ([context [w h :as size] body palette]
+   (ui/bounds body)
+   (ui/fixed-bounds size
+     [(surface context w h)
+      (ui/with-color (theme/token context :color/text)
+        (ui/scissor-view [0 0] size (adapt-colors body (merge (legacy-palette context) palette) context)))])))
 
 (defn border [context width height & [color radius]]
   (ui/with-color (theme/token context (or color :color/border))

@@ -21,7 +21,7 @@
                         :$ns-info [(:$ref this) '(keypath :ns-info)]
                         :drop-object (:drop-object context)
                         :$drop-object [$context '(keypath :drop-object)]))]
-    (eui/adapt-colors (ss/spreadsheet-editor state) (clobber/editor-palette context))))
+    (eui/legacy-view context (:size this) (ss/spreadsheet-editor state) (clobber/editor-palette context))))
 
 (defn run-results [dispatch! $ref active?]
   (let [input (async/chan (async/sliding-buffer 1))

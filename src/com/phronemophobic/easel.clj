@@ -247,7 +247,7 @@
                      :context context
                      :$context $context
                      :scroll-bounds scroll-bounds))]
-      (ui/translate 4 4 ui)))
+      (eui/legacy-view context (:size this) (ui/translate 4 4 ui))))
   model/IResizable
   (-resize [this size _content-scale]
     (assoc this

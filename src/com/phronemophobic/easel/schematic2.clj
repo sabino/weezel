@@ -7,7 +7,6 @@
    [clojure.pprint :as pprint]
    [com.rpl.specter :as specter]
    [com.phronemophobic.easel.ui :as eui]
-   [com.phronemophobic.easel.theme :as theme]
    [com.phronemophobic.easel.model :as model]
    [com.phronemophobic.schematic.model :as sm]
    [com.phronemophobic.schematic.view.component-picker :as component-picker]
@@ -21,19 +20,7 @@
           (let [ns (create-ns value)] (binding [*ns* ns] (refer 'clojure.core)) ns))))
 
 (defn- native-view [size context body]
-  (let [[w h] size]
-    (ui/fixed-bounds size
-      [(eui/surface context w h)
-       (eui/adapt-colors body
-         {[0 0 0] (theme/token context :color/text)
-          [0 0 0 0.8] (theme/token context :color/text)
-          [0.0 0.0 0.0 0.88] (theme/token context :color/text)
-          [1 1 1] (theme/token context :color/surface)
-          [1.0 1.0 1.0] (theme/token context :color/surface)
-          [0.98 0.98 0.98] (theme/token context :color/surface)
-          [0.85 0.85 0.85] (theme/token context :color/header)
-          [0.8509803921568627 0.8509803921568627 0.8509803921568627] (theme/token context :color/border)
-          [1 0 0] (theme/token context :color/accent)} context)])))
+  (eui/legacy-view context size body))
 
 (defn place-element [root element [x y]]
   (let [id (:element/id element)
@@ -115,7 +102,7 @@
   (-stop [this])
   model/IUI
   (-ui [this $context context]
-    (toolbar-ui this $context context))
+    (native-view (:size this) context (toolbar-ui this $context context)))
   model/IResizable
   (-resize [this size _content-scale]
     (assoc this

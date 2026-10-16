@@ -115,7 +115,7 @@
                          :$context $context
                          :extra (:extra this)
                          :$extra [(:$ref this) '(keypath :extra)]))]
-    (tap-view state)))
+    (eui/legacy-view context (:size this) (tap-view state))))
 
 
 (defrecord TapWatcher [dispatch!]

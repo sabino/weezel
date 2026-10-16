@@ -132,7 +132,7 @@
                          :$context $context
                          :extra (:extra this)
                          :$extra [(:$ref this) '(keypath :extra)]))]
-    (ns-view state)))
+    (eui/legacy-view context (:size this) (ns-view state))))
 
 
 (defn ns->interns [ns]

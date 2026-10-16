@@ -705,7 +705,11 @@
                      ;; else
                      context)]
     (ui/vertical-layout
-     (ui/label (pr-str preview-container))
+     (ui/label (case preview-container
+                 :mobile "Phone"
+                 :small-mobile "Small phone"
+                 :desktop "Desktop"
+                 "Canvas"))
      (apply
       ui/horizontal-layout
       (for [container-button-info [{:icon-name "minus-square" :container-type nil}
