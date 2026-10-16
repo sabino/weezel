@@ -5,6 +5,7 @@
    [com.phronemophobic.easel.ui :as eui]
    [com.phronemophobic.easel.clobber :as clobber]
    [clojure.core.async :as async]
+   [clojure.edn :as edn]
    [com.phronemophobic.membrane.spreadsheet
     :as ss]))
 
@@ -23,6 +24,18 @@
                         :$drop-object [$context '(keypath :drop-object)]))]
     (eui/legacy-view context (:size this) (ss/spreadsheet-editor state) (clobber/editor-palette context))))
 
+(defn- calculation-rows [rows]
+  ;; The legacy parser skips naming incomplete cells; nil bindings then break later cells.
+  (mapv (fn [row]
+          (let [row (if (and (= :value (:editor row)) (false? (:value row)))
+                      (assoc row :editor :code-editor :src "false")
+                      row)
+                sym (try (let [value (edn/read-string (:name row))]
+                           (when (simple-symbol? value) value))
+                         (catch Exception _ nil))]
+            (assoc row :sym (or sym (symbol (str "invalid-cell__" (hash (:id row))))))))
+        rows))
+
 (defn run-results [dispatch! $ref active?]
   (let [input (async/chan (async/sliding-buffer 1))
         worker (doto
@@ -35,7 +48,7 @@
                            (try
                              (let [{:keys [cache side-effects ns-info]} (dispatch! :get $ref)
                                    result (ss/calc-spreadsheet (the-ns (:name ns-info))
-                                                               (or cache {}) (or side-effects {}) sheet)]
+                                                               (or cache {}) (or side-effects {}) (calculation-rows sheet))]
                                (dispatch! :update $ref
                                           (fn [state]
                                             (if (and @active? (= sheet (:ss state)))

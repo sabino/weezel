@@ -246,6 +246,38 @@
         (model/-stop sheet)
         (reset! easel/app-state previous)))))
 
+(deftest incomplete-spreadsheet-cells-do-not-break-independent-cells
+  (let [previous @easel/app-state
+        sheet (model/-start (spreadsheet/spreadsheet-applet easel/handler)
+                            '(keypath :sheet) [640 480] [1 1])
+        value #(some-> (get-in @easel/app-state [:sheet :results %]) deref)]
+    (try
+      (reset! easel/app-state
+              {:sheet (assoc sheet :ss
+                       [{:id :unfinished :name "unfinished" :editor :code-editor :src "(+"}
+                        {:id :bad-name :name "invalid/name" :editor :code-editor :src "1"}
+                        {:id :custom :name "custom" :editor :user-defined :src {}}
+                        {:id :flag :name "flag" :editor :value :value false}
+                        {:id :nothing :name "nothing" :editor :value :value nil}
+                        {:id :check :name "check" :editor :code-editor :src "(and (false? flag) (nil? nothing))"}
+                        {:id :answer :name "answer" :editor :code-editor :src "(+ 20 22)"}
+                        {:id :effect :name "effect" :editor :side-effect :side-effect? true
+                         :side-effect-ts 1 :src {:buf (buffer/buffer "(inc answer)" {:mode :insert})}}])})
+      (run! #(%) (::model/queue sheet))
+      (is (loop [n 300]
+            (or (= 43 (value :effect))
+                (when (pos? n) (Thread/sleep 10) (recur (dec n))))))
+      (is (every? #(instance? Throwable (value %)) [:unfinished :bad-name :custom]))
+      (is (false? (value :flag)))
+      (is (nil? (value :nothing)))
+      (is (true? (value :check)))
+      (is (= 42 (value :answer)))
+      (is (= "(+" (get-in @easel/app-state [:sheet :ss 0 :src])))
+      (is (not-any? :sym (get-in @easel/app-state [:sheet :ss])))
+      (finally
+        (model/-stop sheet)
+        (reset! easel/app-state previous)))))
+
 (deftest spreadsheet-closed-before-start-does-not-create-a-worker
   (let [applet (model/-start (spreadsheet/spreadsheet-applet easel/handler)
                              '(keypath :sheet) [640 480] [1 1])]
