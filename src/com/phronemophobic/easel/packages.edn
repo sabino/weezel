@@ -1,0 +1,73 @@
+[{:package/version 1 :id :easel/clobber :name "Clobber" :kind :applet :version "8849885"
+  :description "Structural Clojure editing, inline evaluation, and Paredit."
+  :entry com.phronemophobic.easel.clobber/clobber-applet :args [{:ns user :string ""}]
+  :icon "file-text" :bundled? true :source "https://github.com/phronmophobic/clobber"}
+ {:package/version 1 :id :easel/terminal :name "Terminal" :kind :applet :version "b73da28"
+  :description "A native terminal with a real local shell."
+  :entry com.phronemophobic.easel.term/termlet :icon "code" :bundled? true
+  :source "https://github.com/phronmophobic/term"}
+ {:package/version 1 :id :easel/browser :name "Browser" :kind :applet :version "7d41c0b"
+  :description "An embedded Chromium browser with a local CEF runtime."
+  :entry com.phronemophobic.easel.browser/browslet :args ["https://clojure.org"] :icon "global"
+  :setup com.phronemophobic.easel.browser/install-runtime!
+  :source "https://github.com/phronmophobic/clj-cef2"}
+ {:package/version 1 :id :easel/inspector :name "Viscous" :kind :applet :version "1.3.5"
+  :description "Inspect, navigate, and share Clojure values."
+  :entry com.phronemophobic.easel.inspector/inspector-applet :args [{}] :icon "database" :bundled? true
+  :source "https://github.com/phronmophobic/viscous"}
+ {:package/version 1 :id :easel/flowstorm :name "FlowStorm" :kind :applet :version "4.5.9"
+  :description "Record execution and explore values over time."
+  :entry com.phronemophobic.easel.flowstorm/flowstorm-applet :icon "branches"
+  :deps {com.github.flow-storm/flow-storm-dbg {:mvn/version "4.5.9"}}
+  :source "https://github.com/flow-storm/flow-storm-debugger"}
+ {:package/version 1 :id :easel/dewey :name "Dewey" :kind :applet :version "1"
+  :description "Search the public index of Clojure libraries on GitHub."
+  :entry com.phronemophobic.easel.dewey/dewey-applet :icon "search" :bundled? true
+  :source "https://github.com/phronmophobic/dewey"}
+ {:package/version 1 :id :easel/local-models :name "Local models" :kind :applet :version "0.9.1"
+  :description "Run llama.clj with a GGUF model on your computer."
+  :entry com.phronemophobic.easel.local-models/model-applet :icon "deployment-unit"
+  :deps {com.phronemophobic/llama-clj-combined {:mvn/version "0.9.1"}}
+  :source "https://github.com/phronmophobic/llama.clj"}
+ {:package/version 1 :id :easel/documentation :name "Documentation" :kind :applet :version "1" :bundled? true
+  :description "Live namespaces, metadata, source, and runnable examples."
+  :entry com.phronemophobic.easel.documentation/documentation-applet :icon "book"}
+ {:package/version 1 :id :easel/repl :name "REPL" :kind :applet :version "1" :bundled? true
+  :description "Evaluate forms in a shared workspace namespace."
+  :entry com.phronemophobic.easel.repl/repl-applet :icon "code"}
+ {:package/version 1 :id :easel/git :name "Git" :kind :applet :version "1" :bundled? true
+  :description "Repository status, history, branches, and diffs."
+  :entry com.phronemophobic.easel.git/git-applet :icon "fork"}
+ {:package/version 1 :id :easel/diff :name "Compare files" :kind :applet :version "1" :bundled? true
+  :description "Compare text and inspect changes."
+  :entry com.phronemophobic.easel.diff/diff-applet :args [{:compare? true :before "" :after ""}] :icon "diff"}
+ {:package/version 1 :id :easel/logs :name "Logs" :kind :applet :version "1" :bundled? true
+  :description "Live bounded runtime output."
+  :entry com.phronemophobic.easel.logging/logging-applet :icon "unordered-list"}
+ {:package/version 1 :id :easel/exceptions :name "Exceptions" :kind :applet :version "1" :bundled? true
+  :description "Inspect failures with source navigation."
+  :entry com.phronemophobic.easel.exceptions/exception-applet :icon "warning"}
+ {:package/version 1 :id :easel/spreadsheet :name "Spreadsheet" :kind :applet :version "bc90920" :bundled? true
+  :description "Work with data in a programmable grid."
+  :entry com.phronemophobic.easel.spreadsheet/spreadsheet-applet :icon "table"}
+ {:package/version 1 :id :easel/media :name "Media" :kind :applet :version "1" :bundled? true
+  :description "Preview images and play local audio with the JVM."
+  :entry com.phronemophobic.easel.media/media-applet :icon "picture"}
+ {:package/version 1 :id :easel/membrane :name "Membrane" :kind :library :version "8ecbc9f" :bundled? true
+  :description "Native UI primitives and functional components."
+  :source "https://github.com/phronmophobic/membrane"}
+ {:package/version 1 :id :easel/membrandt :name "Membrandt" :kind :library :version "66da338" :bundled? true
+  :description "UI components for Membrane."
+  :source "https://github.com/phronmophobic/membrandt"}
+ {:package/version 1 :id :easel/bifurcan :name "Bifurcan" :kind :library :version "bundled" :bundled? true
+  :description "Persistent data structures and the Rope used by Clobber."
+  :source "https://github.com/phronmophobic/bifurcan"}
+ {:package/version 1 :id :easel/essentials :name "Essentials" :kind :toolset :version "1" :bundled? true
+  :description "Editor, terminal, inspector, Git, and documentation."
+  :requires [:easel/clobber :easel/terminal :easel/inspector :easel/git :easel/documentation]}
+ {:package/version 1 :id :easel/data-graphics :name "Data & graphics" :kind :toolset :version "1" :bundled? true
+  :description "Live values, graphics, and a programmable grid."
+  :requires [:easel/inspector :easel/spreadsheet :easel/media]}
+ {:package/version 1 :id :easel/models :name "Local models" :kind :toolset :version "1"
+  :description "Local inference with llama.clj."
+  :requires [:easel/local-models]}]

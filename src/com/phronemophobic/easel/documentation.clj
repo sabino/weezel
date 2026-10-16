@@ -9,11 +9,12 @@
             [com.phronemophobic.easel.guides :as guides]
             [com.phronemophobic.easel.inspector :as inspector]
             [com.phronemophobic.easel.model :as model]
+            [com.phronemophobic.easel.ui :as eui]
+            [com.phronemophobic.easel.theme :as theme]
             [com.phronemophobic.membrandt :as ant]
             [com.phronemophobic.viscous :as viscous]
             [membrane.basic-components :as basic]
             [membrane.component :refer [defui defeffect]]
-            [membrane.skia.paragraph :as para]
             [membrane.ui :as ui]))
 
 (def page-size 40)
@@ -62,12 +63,14 @@
   "Locate a var's full source buffer and its one-based definition line.
   Protocol methods fall back to their protocol's declaration."
   [v]
-  (when-let [resource (source-location v)]
-    (let [{:keys [file line ns]} (source-meta v)
+  (if-let [source (:easel/source (meta v))]
+    {:string source :line (or (:line (meta v)) 1) :ns (ns-name (:ns (meta v))) :label "orbit.clj"}
+    (when-let [resource (source-location v)]
+     (let [{:keys [file line ns]} (source-meta v)
           info {:line (or line 1) :ns (some-> ns ns-name)}]
       (if (= "file" (.getProtocol resource))
         (assoc info :file (io/file (.toURI resource)))
-        (assoc info :string (slurp resource) :label file)))))
+        (assoc info :string (slurp resource) :label file))))))
 
 (defn source-intents [v]
   (when-let [info (source-info v)]
@@ -278,7 +281,7 @@
                   :on-click #(vector [::navigate $state target])}))
 
 (defn- prose [text width]
-  (ui/padding 0 4 (para/paragraph text (max 1 (- width 12)))))
+  (ui/padding 0 4 (eui/label text {:width (max 1 (- width 12))})))
 
 (defn- row-layout [width elements]
   (let [{:keys [rows row]} (reduce (fn [{:keys [row row-width] :as layout} element]
@@ -298,10 +301,10 @@
             (let [id [target index]
                   result (get-in state [:results id])
                   ;; Var examples may refer to their defining namespace.
-                  source (if ns (str "(require '[" ns " :refer :all])\n" source) source)]
+                  source (if ns (str "(clojure.core/refer '" ns ")\n" source) source)]
               (ui/vertical-layout
-               (ui/label (or title (str "Example " (inc index))))
-               (ui/padding 0 6 (ui/label source (ui/font "monospace" 11)))
+               (eui/label (or title (str "Example " (inc index))))
+               (ui/padding 0 6 (eui/label source {:role :code :size 12}))
                (row-layout width
                 [(applet/button {:text "Run" :size :small
                                   :disabled? (or (not (:ready? state)) (:busy? state))
@@ -314,9 +317,9 @@
                                     :on-click #(inspect-intents @(or (:exception result) (:value result)))}))])
                (when result
                  (ui/vertical-layout
-                  (ui/label (str (if (:exception result) "! " "=> ") (:summary result)))
-                  (when (seq (:out result)) (ui/label (str "out: " (:out result))))
-                  (when (seq (:err result)) (ui/label (str "err: " (:err result)))))))))
+                  (eui/label (str (if (:exception result) "! " "=> ") (:summary result)))
+                  (when (seq (:out result)) (eui/label (str "out: " (:out result))))
+                  (when (seq (:err result)) (eui/label (str "err: " (:err result)))))))))
           examples)))
 
 (defui page-view [{:keys [state entries render-entry]}]
@@ -325,13 +328,13 @@
         offset (min (:offset state 0) (* page-size (quot (max 0 (dec (count matches))) page-size)))
         page (take page-size (drop offset matches))]
     (ui/vertical-layout
-     (ant/text-input {:text (:query state "") :$text [$state '(keypath :query)]
+     (eui/field {:text (:query state "") :$text [$state '(keypath :query)]
                       :size :small :placeholder "Filter names"})
      (apply ui/vertical-layout (map render-entry page))
      (ui/flex-layout
       [(applet/button {:text "Previous" :size :small :disabled? (zero? offset)
                         :on-click #(vector [:update $state assoc :offset (max 0 (- offset page-size)) :scroll [0 0]])})
-       (ui/label (str (+ (if (seq page) 1 0) offset) "–" (+ offset (count page)) " / " (count matches)))
+       (eui/label (str (+ (if (seq page) 1 0) offset) "–" (+ offset (count page)) " / " (count matches)))
        (applet/button {:text "Next" :size :small :disabled? (>= (+ offset page-size) (count matches))
                         :on-click #(vector [:update $state assoc :offset (+ offset page-size) :scroll [0 0]])})]
       {:gap 4}))))
@@ -343,11 +346,11 @@
           examples (mapv #(assoc % :ns (or (:ns %) (ns-name (:ns meta)))) (var-examples v))]
       (ui/vertical-layout
        (prose (str symbol) width)
-       (ui/label (str (name kind) (when (:private meta) " · private") (when (:dynamic meta) " · dynamic")))
-       (when arglists (ui/label (pr-str arglists) (ui/font "monospace" 11)))
+       (eui/label (str (name kind) (when (:private meta) " · private") (when (:dynamic meta) " · dynamic")))
+       (when arglists (eui/label (pr-str arglists) {:role :code :size 12}))
        (prose (or doc "No docstring. Metadata and source are still available.") width)
        (when-let [file (:file (source-meta v))]
-         (ui/label (str file ":" (:line (source-meta v)))))
+         (eui/label (str file ":" (:line (source-meta v)))))
        (row-layout width
         [(applet/button {:text "Source" :size :small :disabled? (nil? (source-location v))
                           :on-click #(source-intents v)})
@@ -404,7 +407,7 @@
      (prose (str (:label a) " · " (:id a)) width)
      (prose (str (name (:lifecycle a)) " · " (if (:visible? a) "visible" "hidden") " · " (:size a)) width)
      (when (:error a) (prose (:error a) width))
-     (ui/label (:class a))
+     (eui/label (:class a))
      (applet/button {:text "Inspect current applet" :size :small
                      :on-click #(vector [::inspect-applet (:id a)])})
      (prose (if (= :state (:state-key a)) "State" "Applet value") width)
@@ -452,10 +455,65 @@
                 (prose "Observed changes · most recent first" width)
                 (apply ui/vertical-layout
                        (for [{:keys [time id label change]} (reverse (:changes state))]
-                         (ui/label (str time " · " label " (" id ") · " (name change))))))
+                         (eui/label (str time " · " label " (" id ") · " (name change))))))
       (prose "Choose a guide, namespace, or live applet." width))))
 
+(declare documentation-applet)
+
+(defui summary-header [{:keys [applet width]}]
+  (let [v (resolve-var (get-in applet [:state :target :symbol]))]
+    (when (> width 140)
+      (eui/row nil
+       [(eui/button {:text "Source" :variant :link :size :small :disabled? (nil? v) :on-click #(source-intents v)})
+        (eui/button {:text "Metadata" :variant :link :size :small :disabled? (nil? v) :on-click #(inspect-intents (meta v))})]))))
+
+(defn- open-reference [target]
+  [[:com.phronemophobic.easel/add-applet {:make-applet #(documentation-applet % {:target target})}]])
+
+(defui summary-view [{:keys [state size]}]
+  (let [[w h] size
+        target (:target state)
+        v (resolve-var (:symbol target))
+        m (meta v)
+        example (first (var-examples v))
+        id [target 0]
+        result (get-in state [:results id])
+        source (:source example)
+        runnable (when source (str "(clojure.core/refer '" (some-> m :ns ns-name) ")\n" source))
+        body (ui/vertical-layout
+               (eui/text {:text (str (:name m)) :role :code :size 22 :weight :semi-bold})
+               (ui/spacer 0 4)
+               (eui/text {:text (inspector/preview (:arglists m)) :role :code :size 12})
+               (ui/spacer 0 8)
+               (eui/text {:text (or (:doc m) "Inspect a var to read its documentation.") :width (max 1 (- w 40))})
+               (ui/spacer 0 12)
+               (when source
+                 (let [width (max 1 (- w 40))]
+                  (ui/fixed-bounds [width 72]
+                   [(eui/surface context width 72 :color/header 4)
+                    (eui/border context width 72 :color/border 4)
+                    (ui/translate 12 10 (eui/text {:text source :role :code :width (max 1 (- width 84)) :size 12}))
+                    (ui/translate (max 0 (- width 62)) 6
+                      (eui/button {:text "Run" :height 28 :disabled? (or (not (:ready? state)) (:busy? state))
+                                   :on-click #(vector [::run-example $state id runnable])}))
+                  (when result
+                    (ui/translate 12 43
+                     (ui/on :mouse-down #(inspect-intents @(or (:value result) (:exception result)))
+                      (eui/text {:text (str "⇒ " (:summary result)) :role :code :size 12
+                                  :color (if (:exception result) :color/error :color/secondary)}))))])))
+               (ui/spacer 0 12)
+               (eui/wrap-row (max 0 (- w 40))
+                 [(eui/text {:text "Related" :size 12 :color :color/secondary})
+                  (eui/button {:text "IUI" :variant :link :size :small
+                               :on-click #(open-reference {:kind :var :symbol 'com.phronemophobic.easel.model/IUI})})
+                  (eui/button {:text "Applet lifecycle" :variant :link :size :small
+                               :on-click #(open-reference {:kind :guide :id :lifecycle})})]))]
+    (basic/scrollview {:scroll-bounds [(max 0 w) (max 0 h)] :$body nil
+                       :body (ui/padding 20 10 body)})))
+
 (defui documentation-view [{:keys [state size]}]
+ (if (:compact? state)
+  (summary-view {:state state :size size})
   (let [width (max 0 (first size))
         header (ui/vertical-layout
                 (row-layout width
@@ -470,21 +528,21 @@
                                    :on-click #(vector [:update $state assoc :namespaces (loaded-namespaces)
                                                       :revision (inc (:revision state 0))])})])
                 (ui/flex-layout
-                 [(ant/text-input {:text (:lookup state "") :$text [$state '(keypath :lookup)]
+                 [(eui/field {:text (:lookup state "") :$text [$state '(keypath :lookup)]
                                     :size :small :placeholder "namespace or namespace/var"
                                     :flex-layout.stretch/width (max 1 (- width 65))})
                   (applet/button {:text "Go" :size :small :on-click #(vector [::lookup $state])})]
                  {:gap 4})
                 (when (:busy? state)
                   (ui/horizontal-layout
-                   (ui/label "Evaluating example… ")
+                   (eui/label "Evaluating example… ")
                    (applet/button {:text "Cancel" :size :small :on-click #(vector [::cancel-example $state])})))
                 (when-let [error (:error state)] (prose error width)))]
     (basic/scrollview
       {:scroll-bounds [width (max 0 (second size))]
        :offset (:scroll state [0 0]) :$offset [$state '(keypath :scroll)]
        :$body nil
-       :body (ui/vertical-layout header (target-view {:state state :width width}))})))
+       :body (ui/vertical-layout header (target-view {:state state :width width}))}))))
 
 (defn initial-state []
   {:target {:kind :guide :id :start} :back [] :forward []
@@ -498,8 +556,9 @@
   Var metadata may provide :easel/examples and :easel/see-also links."
   {:easel/see-also [com.phronemophobic.easel.model/IApplet
                     com.phronemophobic.easel.applet/tool-applet :documentation]}
-  [handler]
-  (let [state (initial-state)
+  ([handler] (documentation-applet handler {}))
+  ([handler options]
+  (let [state (merge (initial-state) options)
         runner @(:runner state)]
     (assoc
      (applet/tool-applet
@@ -514,4 +573,4 @@
               (when-let [task (:future @runner)] (future-cancel task))
               (reset! runner {:active? false}))
             (when (find-ns (:example-ns state)) (remove-ns (:example-ns state)))))))
-     ::documentation? true)))
+     :icon "book" :header (when (:compact? options) #'summary-header) ::documentation? true))))

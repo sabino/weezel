@@ -1,12 +1,17 @@
 (ns com.phronemophobic.easel.browser
   (:require
    [com.phronemophobic.easel.model :as model]
+   [com.phronemophobic.easel.applet :as applet]
+   [com.phronemophobic.easel.events :as events]
+   [com.phronemophobic.easel.settings :as settings]
+   [com.phronemophobic.easel.ui :as eui]
    [membrane.skia :as skia]
    [membrane.ui :as ui]
    [membrane.component :refer [defeffect defui]]
    [clojure.java.io :as io]
    [com.phronemophobic.gen3 :as gen3]
    [com.phronemophobic.cef :as cef]
+   [com.phronemophobic.cef.env :as cef-env]
    [com.phronemophobic.cef.browser :as b]
    #_[com.phronemophobic.replog :as replog])
   (:import com.sun.jna.Pointer
@@ -21,151 +26,16 @@
 ;;                                    (::replog/ns %)))
 ;;                        (replog/get-main-log)))
 
-;;;;;;;;;;;;;;;;;;
-;; AUTO GENERATED
-;;;;;;;;;;;;;;;;;;
-(membrane.component/defui
-  browser-bar
-  [{:keys [width url]}]
-  (membrane.ui/flex-layout
-   [(com.phronemophobic.membrandt/button
-     {:on-click
-      (fn [] [[:com.phronemophobic.easel.browser/browser-back]]),
-      :text "<"})
-    (com.phronemophobic.membrandt/button
-     {:on-click
-      (fn [] [[:com.phronemophobic.easel.browser/browser-forward]]),
-      :text ">"})
-    (com.phronemophobic.membrandt/button
-     {:on-click
-      (fn [] [[:com.phronemophobic.easel.browser/browser-refresh]]),
-      :text "O"})
-    (com.phronemophobic.membrandt/text-input
-     {:flex.grow/width 1.0, :text url})]
-   {:gap 8, :width width, :height nil}))
-(membrane.component/defui
-  browser-bar
-  [{:keys [width url]}]
-  (membrane.ui/flex-layout
-   [(com.phronemophobic.membrandt/button
-     {:on-click
-      (fn [] [[:com.phronemophobic.easel.browser/browser-back]]),
-      :text "<"})
-    (com.phronemophobic.membrandt/button
-     {:on-click
-      (fn [] [[:com.phronemophobic.easel.browser/browser-forward]]),
-      :text ">"})
-    (com.phronemophobic.membrandt/button
-     {:on-click
-      (fn [] [[:com.phronemophobic.easel.browser/browser-refresh]]),
-      :text "O"})
-    (com.phronemophobic.membrandt/button
-     {:on-click
-      (fn [] [[:com.phronemophobic.easel.browser/load-url url]]),
-      :text "go"})
-    (com.phronemophobic.membrandt/text-input
-     {:flex.grow/width 1.0, :text url})]
-   {:gap 8, :width width, :height nil}))
-(membrane.component/defui
-  browser-bar
-  [{:keys [width url]}]
-  (membrane.ui/flex-layout
-   [(com.phronemophobic.membrandt/button
-     {:on-click
-      (fn [] [[:com.phronemophobic.easel.browser/browser-back]]),
-      :text "<"})
-    (com.phronemophobic.membrandt/button
-     {:on-click
-      (fn [] [[:com.phronemophobic.easel.browser/browser-forward]]),
-      :text ">"})
-    (com.phronemophobic.membrandt/button
-     {:on-click
-      (fn [] [[:com.phronemophobic.easel.browser/browser-refresh]]),
-      :text "O"})
-    (com.phronemophobic.membrandt/button
-     {:on-click
-      (fn [] [[:com.phronemophobic.easel.browser/load-url url]]),
-      :text "go"})
-    (com.phronemophobic.membrandt/text-input
-     {:flex.grow/width 1.0, :text url})]
-   {:gap 0, :width width, :height nil}))
-(membrane.component/defui
-  browser-bar
-  [{:keys [width url]}]
-  (membrane.ui/flex-layout
-   [(com.phronemophobic.membrandt/button
-     {:on-click
-      (fn [] [[:com.phronemophobic.easel.browser/browser-back]]),
-      :text "<"})
-    (com.phronemophobic.membrandt/button
-     {:on-click
-      (fn [] [[:com.phronemophobic.easel.browser/browser-forward]]),
-      :text ">"})
-    (com.phronemophobic.membrandt/button
-     {:on-click
-      (fn [] [[:com.phronemophobic.easel.browser/browser-refresh]]),
-      :text "O"})
-    (com.phronemophobic.membrandt/button
-     {:on-click
-      (fn [] [[:com.phronemophobic.easel.browser/load-url url]]),
-      :text "go"})
-    (com.phronemophobic.membrandt/text-input
-     {:flex.grow/width 1.0, :text url})]
-   {:gap 8, :width width, :height nil}))
-(membrane.component/defui
-  browser-bar
-  [{:keys [width url]}]
-  (membrane.ui/flex-layout
-   [(com.phronemophobic.membrandt/button
-     {:on-click
-      (fn [] [[:com.phronemophobic.easel.browser/browser-back]]),
-      :text "<"})
-    (com.phronemophobic.membrandt/button
-     {:on-click
-      (fn [] [[:com.phronemophobic.easel.browser/browser-forward]]),
-      :text ">"})
-    (com.phronemophobic.membrandt/button
-     {:on-click
-      (fn [] [[:com.phronemophobic.easel.browser/browser-refresh]]),
-      :text "O"})
-    (com.phronemophobic.membrandt/button
-     {:on-click
-      (fn [] [[:com.phronemophobic.easel.browser/load-url url]]),
-      :text "go"})
-    (com.phronemophobic.membrandt/text-input
-     {:flex.grow/width 1.0, :text url})]
-   {:gap 0, :width width, :height nil}))
-(membrane.component/defui
-  browser-bar
-  [{:keys [width url]}]
-  (membrane.ui/flex-layout
-   [(com.phronemophobic.membrandt/button
-     {:on-click
-      (fn [] [[:com.phronemophobic.easel.browser/browser-back]]),
-      :text "<"})
-    (com.phronemophobic.membrandt/button
-     {:on-click
-      (fn [] [[:com.phronemophobic.easel.browser/browser-forward]]),
-      :text ">"})
-    (com.phronemophobic.membrandt/button
-     {:on-click
-      (fn [] [[:com.phronemophobic.easel.browser/browser-refresh]]),
-      :text "O"})
-    (com.phronemophobic.membrandt/button
-     {:on-click
-      (fn [] [[:com.phronemophobic.easel.browser/show-inspector]]),
-      :text "?"})
-    (com.phronemophobic.membrandt/button
-     {:on-click
-      (fn [] [[:com.phronemophobic.easel.browser/load-url url]]),
-      :text "go"})
-    (com.phronemophobic.membrandt/text-input
-     {:flex.grow/width 1.0, :text url})]
-   {:gap 0, :width width, :height nil}))
-;;;;;;;;;;;;;;;;;;
-;; END AUTO GENERATED
-;;;;;;;;;;;;;;;;;;
-
+(defui browser-bar [{:keys [width url ready?]}]
+  (ui/padding 4 2
+    (ui/flex-layout
+     [(eui/button {:text "←" :height 36 :disabled? (not ready?) :on-click #(vector [::browser-back])})
+      (eui/button {:text "→" :height 36 :disabled? (not ready?) :on-click #(vector [::browser-forward])})
+      (eui/button {:text "↻" :height 36 :disabled? (not ready?) :on-click #(vector [::browser-refresh])})
+      (eui/field {:text url :width (max 1 (- width 190)) :disabled? (not ready?)
+                  :on-submit #(vector [::load-url url])})
+      (eui/button {:text "Go" :height 36 :disabled? (not ready?) :on-click #(vector [::load-url url])})]
+     {:gap 4})))
 
 (defeffect ::more! [$num]
   (dispatch! :update $num inc))
@@ -440,108 +310,88 @@
       (browser-bar
        (assoc ui-state
               :width (:width browser-info)
+              :ready? (some? (:browser browser-info))
               :context context
               :$context $context)))
      view)))
 
 
 
+(defn runtime-path []
+  (io/file (or (System/getenv "EASEL_CEF_ROOT") (.getPath (settings/file "runtimes" "cef")))))
+
+(defn install-runtime! []
+  (let [target (runtime-path)]
+    (.mkdirs target)
+    (cef-env/download-and-extract-framework target)))
+
+(declare browslet)
+
 (defrecord Browslet [dispatch! initial-url]
   model/IApplet
-  (-start [this $ref [initial-width initial-height] [initial-content-sx initial-content-sy]]
-    (let [dispatch-main
-          (fn [work]
-            (dispatch! :dispatch-main work))
-
+  (-start [this $ref [width height] [sx sy]]
+    (let [resources (atom {:active? true})
+          draw-lock (Object.)
+          $info [$ref '(keypath :browser-info)]
           $url [$ref '(keypath :ui-state) '(keypath :url)]
-          ui-state {:url initial-url
-                    :$url $url
-                    :extra {}
-                    :$extra [$ref '(keypath :ui-state) '(keypath :extra)]}
-          $browser-info [$ref
-                         '(keypath :browser-info)]
-
-          cef-path (doto (io/file
-                          "/Users/adrian/workspace/easel"
-                          ".cef")
-                     (.mkdirs))
-          cache-path (doto (io/file
-                            "/Users/adrian/workspace/easel"
-                            ".browser-cache")
-                       (.mkdirs))
-
-          ;; If content scale isn't equal for x and y, just use 1.
-          initial-content-scale (if (= initial-content-sx initial-content-sy)
-                                  initial-content-sx
-                                  1)]
-      (assoc this
-             :ui-state ui-state
-             ::model/queue
-             [(fn []
-                (future
-                  (b/create-browser [initial-width initial-height initial-content-scale]
-                                    initial-url
-                                    dispatch-main
-                                    {:on-after-created
-                                     (fn [browser]
-                                       (dispatch! :update $browser-info
-                                                  assoc :browser browser)
-                                       
-                                       (let [host (gen3/call browser :get_host)]
-                                         (gen3/call host :set_focus (int 1))
-                                         
-                                         #_(.setFocus host 1)))
-                                     :remote-debugging-port 8888
-
-                                     
-                                     #_#_:on-before-close
-                                     (fn [browser]
-                                       (dispatch! :update $browser-info
-                                                  dissoc :browser))
-                                     :life-span-handler/on-before-popup
-                                     (fn [{:keys [target-url]}]
-                                       (dispatch! :com.phronemophobic.easel/add-applet
-                                                  {:make-applet
-                                                   (fn [handler]
-                                                     ((requiring-resolve 'com.phronemophobic.easel.browser/browslet)
-                                                      handler
-                                                      target-url))}))
-                                     :load-handler/on-load-start
-                                     (fn [browser frame transition-type]
-                                       (when (= 1 (gen3/call frame :is_main))
-                                         (-> browser
-                                             (gen3/call :get_host)
-                                             (gen3/call :set_focus (int 1)))
-                                         (let [;; todo: needs memory management
-                                               ;; The resulting string must be freed by calling cef_string_userfree_free().
-                                               url (gen3/call frame :get_url)]
-                                           (dispatch! :set $url url))))
-                                     :cef-path cef-path
-                                     :cache-path cache-path
-                                     :on-paint+content-scale
-                                     (fn [browser content-scale  paint-type nrects rects buffer width height]
-                                       (skia-draw dispatch! $browser-info content-scale paint-type nrects rects buffer width height)
-                                       (dispatch! :repaint!))})))]
-             :browser-info
-             {:draw-lock (Object.)
-              :width initial-width
-              :height initial-height})))
-
+          scale (if (= sx sy) sx 1)
+          dispatch-main #(dispatch! :dispatch-main %)
+          start! (fn []
+                   (future
+                     (try
+                       (when (:active? @resources)
+                         (cef/prepare-environment! (runtime-path))
+                         (b/create-browser
+                          [width (max 1 (- height 40)) scale] initial-url dispatch-main
+                          {:cef-path (runtime-path)
+                           :cache-path (doto (settings/file "cache" "browser") (.mkdirs))
+                           :on-after-created
+                           (fn [browser]
+                             (locking resources
+                               (if (:active? @resources)
+                                 (do (swap! resources assoc :browser browser)
+                                     (dispatch! :update $info assoc :browser browser)
+                                     (gen3/call (gen3/call browser :get_host) :set_focus (int 1)))
+                                 (b/close browser))))
+                           :life-span-handler/on-before-popup
+                           (fn [{:keys [target-url]}]
+                             (when (:active? @resources)
+                               (dispatch! :com.phronemophobic.easel/add-applet
+                                          {:make-applet #(browslet % target-url)})))
+                           :load-handler/on-load-start
+                           (fn [_ frame _]
+                             (when (and (:active? @resources) (= 1 (gen3/call frame :is_main)))
+                               (dispatch! :set $url (gen3/call frame :get_url))))
+                           :on-paint+content-scale
+                           (fn [_ scale paint-type nrects rects buffer width height]
+                             (locking resources
+                               (when (:active? @resources)
+                                 (skia-draw dispatch! $info scale paint-type nrects rects buffer width height)
+                                 (dispatch! :repaint!))))}))
+                       (catch Throwable e
+                         (events/report! e)
+                         (dispatch! :update $ref assoc ::applet/error e)))))]
+      (assoc this :$ref $ref :size [width height] :resources resources
+             :ui-state {:url initial-url :$url $url :extra {}
+                        :$extra [$ref '(keypath :ui-state) '(keypath :extra)]}
+             :browser-info {:draw-lock draw-lock :width width :height (max 1 (- height 40))}
+             ::model/queue [start!])))
   (-stop [this]
-    (when-let [browser (-> this :browser-info :browser)]
-      (b/close browser))
-    (update this :browser-info dissoc :browser))
+    (when-let [resources (:resources this)]
+      (locking resources
+        (when (:active? @resources)
+          (swap! resources assoc :active? false)
+          (when-let [browser (:browser @resources)] (b/close browser))
+          (when-let [resource (get-in this [:browser-info :resource])]
+            (dispatch! :dispatch-main #(locking (get-in this [:browser-info :draw-lock]) (skia_cleanup resource)))))))
+    nil)
   model/IUI
-  (-ui [this $context context]
-    (browser-ui this $context context))
+  (-ui [this $context context] (browser-ui this $context context))
   model/IResizable
-  (-resize [this size content-scale]
-    (when-let [browser (-> this :browser-info :browser)]
-      (let [[sx sy] content-scale]
-        (if (= sx sy)
-          (b/resize browser size sx)
-          (b/resize browser size 1))))
-    this))
+  (-resize [this [width height :as size] [sx sy]]
+    (when-let [browser (get-in this [:browser-info :browser])]
+      (b/resize browser [width (max 1 (- height 40))] (if (= sx sy) sx 1)))
+    (assoc this :size size)))
 
 
 (defn browslet [handler url]

@@ -1,0 +1,9 @@
+{:workspace/version 1
+ :id :easel/data-lab
+ :name "Data lab"
+ :applets [{:slot :values :tool :easel/inspector :args [{}]}
+           {:slot :documentation :tool :easel/documentation}
+           {:slot :repl :tool :easel/repl :args [user] :dock :repl}]
+ :layout {:direction :row
+          :panes [{:slot :values :flex.grow/width 2}
+                  {:slot :documentation :flex.grow/width 1}]}}

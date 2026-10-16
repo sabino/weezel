@@ -7,7 +7,6 @@
             [com.rpl.specter :as specter]
             [membrane.alpha.component.drag-and-drop :as dnd]
             [com.phronemophobic.membrandt :as ant]
-
             [membrane.component
              :refer
              [defui defeffect]]))
@@ -260,6 +259,26 @@
                             subpanes)))
       ;; leaf node with no children
       pane)))
+
+(defn layout-workspace [pane gap]
+  (if (seq (:panes pane))
+    (let [direction (:direction pane :row)
+          column? (= :column direction)
+          children (:panes pane)
+          axis-gap (if (> (count children) 1)
+                     (min gap (/ (max 0 (get-size pane direction)) (dec (count children)))) 0)
+          available (max 0 (- (get-size pane direction) (* axis-gap (dec (count children)))))
+          sizes (child-sizes children direction available)
+          result (reduce (fn [{:keys [offset] :as result} [child size]]
+                           (let [child (-> child
+                                           (set-size direction size)
+                                           (set-cross-size direction (max 0 (get-cross-size pane direction)))
+                                           (assoc :x (if column? 0 offset) :y (if column? offset 0))
+                                           (layout-workspace gap))]
+                             (-> result (update :panes conj child) (assoc :offset (+ offset size axis-gap)))))
+                         {:offset 0 :panes []} (map vector children sizes))]
+      (assoc pane :panes (:panes result)))
+    pane))
 
 (defn pane->view [pane]
   (loop [view (transient [])

@@ -23,6 +23,9 @@
                     {:tokens {:font/ui []}}
                     {:tokens {:test/a :test/b :test/b :test/a}}
                     {:tokens {:test/a :test/missing}}
+                    {:components {:button {:height "large"}}}
+                    {:components {:field {:height :color/accent}}}
+                    {:components {:button {:padding :metric/missing}}}
                     {:extends :test/missing}]]
     (is (thrown? clojure.lang.ExceptionInfo
                  (theme/resolve-theme (merge {:theme/version 1 :id :test/theme :name "Test"

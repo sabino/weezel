@@ -1,0 +1,17 @@
+{:workspace/version 1
+ :id :easel/sketchbook
+ :name "Sketchbook"
+ :session {:namespace sketchbook.orbit}
+ :applets
+ [{:slot :editor :tool :easel/clobber :session-source? true :label "orbit.clj"}
+  {:slot :preview :tool :easel/orbit}
+  {:slot :inspector :tool :easel/scene-inspector}
+  {:slot :documentation :tool :easel/documentation :session-docs? true}
+  {:slot :repl :tool :easel/repl :dock :repl}]
+ :layout
+ {:direction :row
+  :panes [{:slot :editor :flex.grow/width 34}
+          {:slot :preview :flex.grow/width 36}
+          {:direction :column :flex.grow/width 30
+           :panes [{:slot :inspector :flex.grow/height 58}
+                   {:slot :documentation :flex.grow/height 42}]}]}}

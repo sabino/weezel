@@ -1,0 +1,6 @@
+{:workspace/version 1
+ :id :easel/notes
+ :name "Notes"
+ :applets [{:slot :notes :tool :easel/clobber :label "Notes" :args [{:string ""}]}
+           {:slot :repl :tool :easel/repl :args [user] :dock :repl}]
+ :layout {:direction :row :panes [{:slot :notes}]}}

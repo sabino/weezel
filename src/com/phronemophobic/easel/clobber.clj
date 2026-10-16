@@ -7,6 +7,9 @@
    [membrane.alpha.component.drag-and-drop :as dnd]
    [com.phronemophobic.easel.model :as model]
    [com.phronemophobic.easel.evaluation :as evaluation]
+   [com.phronemophobic.easel.inspector :as inspector]
+   [com.phronemophobic.easel.theme :as theme]
+   [com.phronemophobic.easel.ui :as eui]
    [com.phronemophobic.clobber.util :as clobber-util]
    [membrane.basic-components :as basic]
    [membrane.skia.paragraph :as para]
@@ -19,12 +22,10 @@
    [com.phronemophobic.clobber.editor :as clobber-editor]  
    [nextjournal.beholder :as beholder]
    [clojure.zip :as z]
-
    [com.phronemophobic.clobber.modes.clojure :as clojure-mode]
    [com.phronemophobic.clobber.modes.text :as text-mode]
    [com.phronemophobic.clobber.util.ui.key-binding :as key-binding]
-
-   [com.phronemophobic.membrandt :as ant]))
+   [com.phronemophobic.clobber.util.ui :as util.ui]))
 
 (defn evaluation-source [editor scope]
   (let [tree (:tree editor)
@@ -162,6 +163,68 @@
     p))
 
 (declare clobber-applet)
+
+(defn editor-palette [context]
+  (merge {[0 0 0] (theme/token context :color/text)
+          [0.98 0.98 0.98] (theme/token context :color/surface)
+          [0.85 0.85 0.85] (theme/token context :color/header)}
+         (into {} (for [[capture token] {"number" :color/code-string "string" :color/code-string
+                                         "constant.builtin" :color/code-definition "constant" :color/code-keyword
+                                         "comment" :color/code-comment "defn" :color/code-definition}]
+                    [(get clojure-mode/text-colors capture) (theme/token context token)]))))
+
+(defui code-editor [{:keys [editor focused?]}]
+  (let [body (cui/editor-view {:editor editor :focused? focused?})
+        body (cond
+               (not focused?) body
+               (::util.ui/file-picker-state editor)
+               (ui/vertical-layout body (util.ui/file-picker {:editor editor :update-editor-intent ::cui/update-editor}))
+               (::text-mode/search editor)
+               (ui/vertical-layout body (util.ui/search-bar {:editor editor :update-editor-intent ::cui/update-editor}))
+               :else (key-binding/wrap-editor-key-bindings
+                       {:key-bindings (:key-bindings editor) :editor editor :update-editor-intent ::cui/update-editor
+                        :body body :$body nil}))
+        body (if focused?
+               (->> body
+                    (ui/on-clipboard-copy (fn [] [[::cui/editor-copy {:editor editor :$editor $editor}]]))
+                    (ui/on-clipboard-paste (fn [s] [[::cui/editor-paste {:editor editor :$editor $editor :s s}]])))
+               body)
+        row-height (* (get-in editor [:base-style :text-style/height])
+                      (get-in editor [:base-style :text-style/font-size]))
+        start-line (get-in editor [:viewport :start-line] 0)
+        lines (take (get-in editor [:viewport :num-lines] 1)
+                    (drop start-line (str/split (str (:rope editor)) #"\n" -1)))
+        gutter (apply ui/vertical-layout
+                      (map-indexed (fn [index _]
+                                     (ui/fixed-bounds [40 row-height]
+                                       (eui/text {:text (str (+ start-line index 1)) :role :code
+                                                   :color :color/muted :size 11}))) lines))
+        initial-value (when (= (:rope editor) (:easel/initial-rope editor)) (:easel/initial-value editor))
+        value (or (some->> (get (:line-val editor) (:rope editor)) (sort-by key) last val) initial-value)
+        preview (when value
+                  (ui/on :mouse-down
+                    (fn [_] [[:com.phronemophobic.easel/add-applet {:make-applet #(inspector/inspector-applet % @value)}]])
+                    (ui/vertical-layout
+                     (eui/text {:text (if (sequential? @value)
+                                        (let [n (bounded-count 25 @value)] (str "▾ " n (when (= n 25) "+") " values")) "⇒ value")
+                                 :role :code :size 12 :color :color/secondary})
+                     (ui/spacer 0 8)
+                     (eui/text {:text (if (sequential? @value)
+                                        (str (str/join "\n" (map (fn [v]
+                                                                    (if (and (vector? v) (= 2 (count v)) (every? number? v))
+                                                                      (format "[%.1f %.1f]" (double (first v)) (double (second v)))
+                                                                      (inspector/preview v))) (take 5 @value))) "\n…")
+                                        (inspector/preview @value))
+                                 :role :code :size 12 :width (max 1 (- (:width editor) 72))}))))]
+    (ui/wrap-on :mouse-down
+      (fn [handler pos] (cons [::cui/request-focus] (handler pos)))
+      (ui/fixed-bounds [(:width editor) (:height editor)]
+        [(eui/surface context (:width editor) (:height editor))
+         (ui/translate 16 18 gutter)
+         (ui/translate 52 18 (eui/adapt-colors body (editor-palette context)))
+         (when preview
+           (ui/translate 52 (+ 34 (* row-height (count lines))) preview))]))))
+
 (defui clobber-ui* [{:keys [this]}]
   (let [focus (:focus context)
         state (:state this)
@@ -207,13 +270,13 @@
                   ::cui/request-focus
                   (fn []
                     [[:set $focus (:id this)]])
-                  (let [ui (:ui this)
+                  (let [ui (if (identical? (:ui this) #'cui/code-editor) #'code-editor (:ui this))
                         extra (:extra state)]
                     (ui {:editor editor
                          :$editor $editor
                          :focused? focused?
                          :extra extra
-                         :$extra $extra})))
+                         :$extra $extra :context context :$context $context})))
             body (if buffer-select-state
                    (ui/on
                     :mouse-down
@@ -237,7 +300,8 @@
 
 (defn resize-editor [editor [width height]]
   (-> editor
-      (cui/editor-set-height height)
+      (assoc :base-style (eui/text-style nil {:role :code}))
+      (cui/editor-set-height (max 0 (- height 36)))
       (assoc :width width :height height)
       text-mode/editor-update-viewport))
 
@@ -253,6 +317,9 @@
                    (assoc editor :cursor {:byte 0 :char 0 :point 0 :row 0 :column-byte 0}))
                  editor)
 
+        editor (cond-> editor
+                 (:initial-value editor-info)
+                 (assoc :easel/initial-value (:initial-value editor-info) :easel/initial-rope (:rope editor)))
         editor (assoc editor
                       :label (:label editor-info)
                       :key-bindings

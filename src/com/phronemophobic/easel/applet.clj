@@ -1,13 +1,13 @@
 (ns com.phronemophobic.easel.applet
   (:require [com.phronemophobic.easel.model :as model]
             [com.phronemophobic.easel.events :as events]
-            [com.phronemophobic.membrandt :as ant]
+            [com.phronemophobic.easel.ui :as eui]
+            [com.phronemophobic.easel.theme :as theme]
             [membrane.component :refer [defui]]
-            [membrane.skia.paragraph :as para]
             [membrane.ui :as ui]))
 
 (defui button [{:keys [text size disabled? on-click]}]
-  (ant/button {:text text :size size :disabled? disabled?
+  (eui/button {:text text :size size :disabled? disabled?
                :on-click (when-not disabled? on-click)}))
 
 (defn error-message [e]
@@ -22,13 +22,14 @@
       (events/report! e))))
 
 (defn safe-ui [this $context context]
-  (let [failure (fn [e]
+  (let [context (assoc context ::theme/applet (:package/id this))
+        failure (fn [e]
                   (report-once! this e)
                   (ui/vertical-layout
-                   (ui/label (str (:label this) " could not run"))
-                   (para/paragraph (error-message e)
-                                   (max 1 (first (:size this))))
-                   (ant/button {:text "Retry" :size :small
+                   (eui/text {:text (str (:label this) " could not run") :context context :$context $context})
+                   (eui/text {:text (error-message e) :width (max 1 (first (:size this)))
+                              :context context :$context $context :color :color/error})
+                   (eui/button {:text "Retry" :size :small :context context :$context $context
                                 :on-click #(vector [:com.phronemophobic.easel/retry-applet {:id (:id this)}])})))
         report-event (fn [handler & args]
                        (try

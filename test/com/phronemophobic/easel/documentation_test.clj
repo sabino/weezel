@@ -209,7 +209,9 @@
     (ui/key-press (app) "com.phronemophobic.easel.model")
     (click "Go")
     (is (= :namespace (get-in @state [:state :target :kind])))
-    (ui/mouse-down (app) [10 158])
+    (let [field (some #(when (= "Filter names" (:placeholder %)) %) (nodes (app)))]
+      (is field)
+      (run! #(apply handler %) (ui/mouse-down field [10 10])))
     (ui/key-press (app) "IApplet")
     (is (= "IApplet" (get-in @state [:state :query])))
     (click "IApplet · protocol")

@@ -1,6 +1,7 @@
 (ns com.phronemophobic.easel.settings
   (:require [clojure.java.io :as io]
-            [com.phronemophobic.easel.theme :as theme])
+            [com.phronemophobic.easel.theme :as theme]
+            [com.phronemophobic.easel.events :as events])
   (:import [java.nio.file Files StandardCopyOption]))
 
 (def ^:dynamic *directory*
@@ -9,13 +10,23 @@
 
 (defn file [& path] (apply io/file *directory* path))
 
-(defn read-settings []
+(defn- read-settings-strict []
   (let [source (file "settings.edn")]
     (if (.isFile source)
       (let [value (theme/read-data source)]
         (when-not (map? value) (throw (ex-info "Settings must be an EDN map" {})))
         value)
       {})))
+
+(defonce read-failure (atom nil))
+
+(defn read-settings []
+  (try (let [value (read-settings-strict)] (reset! read-failure nil) value)
+       (catch Throwable e
+         (let [fingerprint [(.getPath (file "settings.edn")) (.getMessage e)]]
+           (when (not= fingerprint @read-failure)
+             (reset! read-failure fingerprint) (events/report! e)))
+         {})))
 
 (defn write-data! [target value]
   (let [target (.getAbsoluteFile (io/file target))
@@ -35,4 +46,4 @@
 
 (defn update-settings! [f & args]
   (locking *directory*
-    (write-data! (file "settings.edn") (apply f (read-settings) args))))
+    (write-data! (file "settings.edn") (apply f (read-settings-strict) args))))
